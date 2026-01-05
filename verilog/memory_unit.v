@@ -230,14 +230,10 @@ module memory_unit(
       if (gc_k < gc_n) begin
         mem_addr1 <= gc_k;
         gc_k <= gc_k +1;
-        $display("0x%0h 0x%8h", gc_k-1, mem_data_out1);
         state <= STATE_DUMP2;
       end else begin 
         read_data1 <= gc_h; // replace with new root
         state <= next_state;
-        $display("0x%0h 0x%8h", gc_k-1, mem_data_out1);
-        $display("fin");
-        $stop;
       end
     end
     
@@ -455,13 +451,11 @@ module memory_unit(
             //mem_write <= 1;
             gc_state <= GC_WAIT;
             gc_next_state <= GC_WTF;
-            $display("0x%0h 0x%8h", gc_k-1, mem_data_out1);
           end else begin 
             read_data1 <= gc_h; // replace with new root
             gc <= 0;
             //gc_state <= GC_INIT;
             state <= STATE_WAIT;
-            $display("0x%0h 0x%8h", gc_k-1, mem_data_out1);
           end
         end
         

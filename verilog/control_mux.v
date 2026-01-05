@@ -42,44 +42,55 @@ module control_mux(
 );
 
 always @(*) begin
+  finished = 1'b0;
+  return_sys_func = 4'b0000;
+  return_state = 4'b0000;
+  execute_address = {`memory_addr_width{1'b0}};
+  execute_data = {`memory_data_width{1'b0}};
+  cell_address = {`memory_addr_width{1'b0}};
+  cell_data = {`memory_data_width{1'b0}};
+  incr_address = {`memory_addr_width{1'b0}};
+  incr_data = {`memory_data_width{1'b0}};
+  equal_address = {`memory_addr_width{1'b0}};
+  equal_data = {`memory_data_width{1'b0}};
+  edit_address = {`memory_addr_width{1'b0}};
+  edit_data = {`memory_data_width{1'b0}};
+
   case(sel)
-    `MUX_TRAVERSAL: begin
-      finished <= finished;
-    end
     `MUX_EXECUTE: begin
-      finished <= execute_finished;
-      return_sys_func <= execute_return_sys_func;
-      return_state <= execute_return_state;
-      execute_address <= module_address;
-      execute_data <= module_data;
+      finished = execute_finished;
+      return_sys_func = execute_return_sys_func;
+      return_state = execute_return_state;
+      execute_address = module_address;
+      execute_data = module_data;
     end
     `MUX_CELL: begin
-      finished <= cell_finished;
-      return_sys_func <= cell_return_sys_func;
-      return_state <= cell_return_state;
-      cell_address <= module_address;
-      cell_data <= module_data;
+      finished = cell_finished;
+      return_sys_func = cell_return_sys_func;
+      return_state = cell_return_state;
+      cell_address = module_address;
+      cell_data = module_data;
     end
     `MUX_INCR: begin
-      finished <= incr_finished;
-      return_sys_func <= incr_return_sys_func;
-      return_state <= incr_return_state;
-      incr_address <= module_address;
-      incr_data <= module_data;
+      finished = incr_finished;
+      return_sys_func = incr_return_sys_func;
+      return_state = incr_return_state;
+      incr_address = module_address;
+      incr_data = module_data;
     end
     `MUX_EQUAL: begin
-      finished <= equal_finished;
-      return_sys_func <= equal_return_sys_func;
-      return_state <= equal_return_state;
-      equal_address <= module_address;
-      equal_data <= module_data;
+      finished = equal_finished;
+      return_sys_func = equal_return_sys_func;
+      return_state = equal_return_state;
+      equal_address = module_address;
+      equal_data = module_data;
     end
     `MUX_EDIT: begin
-      finished <= edit_finished;
-      return_sys_func <= edit_return_sys_func;
-      return_state <= edit_return_state;
-      edit_address <= module_address;
-      edit_data <= module_data;
+      finished = edit_finished;
+      return_sys_func = edit_return_sys_func;
+      return_state = edit_return_state;
+      edit_address = module_address;
+      edit_data = module_data;
     end
     default: begin // Default case can be used to handle unexpected values
     end
@@ -87,4 +98,3 @@ always @(*) begin
 end
 
 endmodule
-

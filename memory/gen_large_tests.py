@@ -1,13 +1,23 @@
-from noun import * # make this a pip package some day
-import sys
+#!/usr/bin/env python3
+import os
 
-def cue_noun(data):
-    x = cue(int.from_bytes(data[5:], 'little'))
 
-    hed_len = (x.head.bit_length()+7)//8
-    mark = x.head.to_bytes(hed_len,'little').decode()
-    noun = x.tail
-    return (mark,noun)
+class Cell:
+    def __init__(self, head, tail):
+        self.head = head
+        self.tail = tail
+
+
+def listify(items):
+    if len(items) == 1:
+        return items[0]
+    return Cell(items[0], listify(items[1:]))
+
+
+def left_chain(depth, leaf, right):
+    if depth == 0:
+        return leaf
+    return Cell(left_chain(depth - 1, leaf, right), right)
 
 
 memory = [0]
@@ -17,6 +27,7 @@ EXECUTE_BIT = 1 << 63
 HED_TAG_BIT = 1 << 57
 TEL_TAG_BIT = 1 << 56
 LARGE_ATOM_BIT = 1 << 60
+
 
 def emit_large_atom(value):
     limbs = []
@@ -53,6 +64,7 @@ def emit_large_atom(value):
     )
     return header_addr
 
+
 def emit_noun(noun):
     if isinstance(noun, Cell):
         return 0, emit_cell(noun)
@@ -61,6 +73,7 @@ def emit_noun(noun):
             return 1, noun & bitmask
         return 0, emit_large_atom(noun)
     raise TypeError("unsupported noun type")
+
 
 def emit_cell(noun):
     cell_loc = len(memory)
@@ -79,48 +92,44 @@ def emit_cell(noun):
     )
     return cell_loc
 
-def inorder_traversal(noun):
-    if isinstance(noun, int):
-        print("error")
-        return
-    emit_cell(noun)
 
-number = "59.500.485.596.334.891.570.437"
+def write_mem(path, noun):
+    global memory
+    memory = [0]
+    emit_noun(noun)
+    memory[0] = len(memory)
+    with open(path, "w") as handle:
+        for mem in memory:
+            handle.write(f"{mem:016x}\n")
+
 
 def main():
-    # Check if two arguments (excluding the script name) are provided
-    if len(sys.argv) != 3:
-        print("Usage: python3 noun_converter.py <jammed-noun> <filename>")
-        sys.exit(1)
+    out_dir = os.path.dirname(__file__)
+    big_axis = 1 << 28
+    big_atom = (1 << 28) + ((1 << 28) - 1)
 
-    # Extract arguments
-    number_str = sys.argv[1]
-    filename = sys.argv[2]
-    noun = None
-    # Validate if the first argument is a number
-    try:
-        # Attempt to convert the number argument to a float
-        number = int(number_str.replace('.',''))
-        noun = cue(number)
-        #pretty(noun, False)
-        #print(noun)
-    except ValueError:
-        print("The first argument must be a number.")
-        sys.exit(1)
+    subject_deep = left_chain(28, 42, 0)
+    slot_formula = listify([0, big_axis])
+    slot_noun = listify([subject_deep, slot_formula])
+    write_mem(os.path.join(out_dir, "large_axis_slot.hex"), slot_noun)
 
-    inorder_traversal(noun)
-    memory[0] = len(memory)
-    #for mem in memory:
-    #    print(format(mem, '016x'))
+    incr_formula = listify([4, listify([1, big_atom])])
+    incr_noun = listify([0, incr_formula])
+    write_mem(os.path.join(out_dir, "large_atom_incr.hex"), incr_noun)
 
-    # Work with the file
-    try:
-        with open(filename, 'w') as file:
-            for mem in memory:
-                file.write(format(mem, '016x')+'\n')
-    except IOError as e:
-        print(f"An error occurred while working with the file: {e}")
-        sys.exit(1)
-    
+    eq_formula = listify([5, listify([1, big_atom]), listify([1, big_atom])])
+    eq_noun = listify([0, eq_formula])
+    write_mem(os.path.join(out_dir, "large_atom_equal.hex"), eq_noun)
+
+    new_val = 99
+    replace_formula = listify([
+        10,
+        listify([big_axis, listify([1, new_val])]),
+        listify([0, 1]),
+    ])
+    replace_noun = listify([subject_deep, replace_formula])
+    write_mem(os.path.join(out_dir, "large_axis_replace.hex"), replace_noun)
+
+
 if __name__ == "__main__":
     main()

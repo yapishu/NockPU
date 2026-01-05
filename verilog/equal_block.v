@@ -39,6 +39,11 @@ module equal_block (
   reg [`memory_addr_width - 1:0] mem_addr2;
   reg [`noun_width - 1:0] hed1, tel1;
   reg [`noun_width - 1:0] hed2, tel2;
+  reg [`noun_width - 1:0] la_len1, la_len2;
+  reg [`memory_addr_width - 1:0] la_ptr1, la_ptr2;
+  reg [`noun_width - 1:0] la_index;
+  reg [`noun_width - 1:0] la_small_value;
+  reg la_compare_small;
 
   // Traversal Registers needed
   reg [`noun_width - 1:0] trav1_P;
@@ -60,6 +65,7 @@ module equal_block (
             FUNC_READ     = 4'h1,
             FUNC_WRITE    = 4'h2,
             FUNC_TRAVERSE = 4'h3,
+            FUNC_LA       = 4'h4,
             FUNC_RETURN   = 4'h5;
 
   // Init States
@@ -88,6 +94,11 @@ module equal_block (
             RETURN_WAIT       = 4'h1,
             RETURN_PAUSE      = 4'h2;
 
+  // Large Atom Compare States
+  parameter LA_INIT   = 4'h0,
+            LA_READ   = 4'h1,
+            LA_WAIT   = 4'h2;
+
 
   always @(posedge clk) begin
     // Flip-flop to store the previous state of equal_start
@@ -105,6 +116,13 @@ module equal_block (
       func <= FUNC_INIT;
       is_finished_reg <=0;
       debug_sig <=0;
+      la_len1 <= 0;
+      la_len2 <= 0;
+      la_ptr1 <= 0;
+      la_ptr2 <= 0;
+      la_index <= 0;
+      la_small_value <= 0;
+      la_compare_small <= 0;
     end 
     else if (equal_start == `MUX_EQUAL) begin
       case (func)
@@ -185,8 +203,65 @@ module equal_block (
                 tel1 <= read_data1[`tel_start:`tel_end];
                 hed2 <= read_data2[`hed_start:`hed_end];
                 tel2 <= read_data2[`tel_start:`tel_end];
-                // If tags aren't equal then the subtrees arent equal
-                if(read_data1[`hed_tag:`tel_tag] 
+                if (read_data1[`large_atom_bit] || read_data2[`large_atom_bit]) begin
+                  if (read_data1[`large_atom_bit] && read_data2[`large_atom_bit]) begin
+                    if (read_data1[`hed_tag] != `CELL || read_data1[`tel_tag] != `ATOM
+                    || read_data2[`hed_tag] != `CELL || read_data2[`tel_tag] != `ATOM) begin
+                      write_value <= `NO;
+                      func <= FUNC_RETURN;
+                      state <= RETURN_INIT;
+                    end else begin
+                      la_len1 <= read_data1[`tel_start:`tel_end];
+                      la_len2 <= read_data2[`tel_start:`tel_end];
+                      la_ptr1 <= read_data1[`hed_start:`hed_end];
+                      la_ptr2 <= read_data2[`hed_start:`hed_end];
+                      la_index <= 0;
+                      la_compare_small <= 1'b0;
+                      func <= FUNC_LA;
+                      state <= LA_INIT;
+                    end
+                  end else if (read_data1[`large_atom_bit]) begin
+                    if (read_data1[`hed_tag] != `CELL || read_data1[`tel_tag] != `ATOM) begin
+                      write_value <= `NO;
+                      func <= FUNC_RETURN;
+                      state <= RETURN_INIT;
+                    end else if (read_data2[`hed_tag] == `ATOM && read_data2[`tel_tag] == `ATOM
+                    && read_data2[`tel_start:`tel_end] == `NIL) begin
+                      la_len1 <= read_data1[`tel_start:`tel_end];
+                      la_ptr1 <= read_data1[`hed_start:`hed_end];
+                      la_ptr2 <= 0;
+                      la_index <= 0;
+                      la_small_value <= read_data2[`hed_start:`hed_end];
+                      la_compare_small <= 1'b1;
+                      func <= FUNC_LA;
+                      state <= LA_INIT;
+                    end else begin
+                      write_value <= `NO;
+                      func <= FUNC_RETURN;
+                      state <= RETURN_INIT;
+                    end
+                  end else begin
+                    if (read_data2[`hed_tag] != `CELL || read_data2[`tel_tag] != `ATOM) begin
+                      write_value <= `NO;
+                      func <= FUNC_RETURN;
+                      state <= RETURN_INIT;
+                    end else if (read_data1[`hed_tag] == `ATOM && read_data1[`tel_tag] == `ATOM
+                    && read_data1[`tel_start:`tel_end] == `NIL) begin
+                      la_len1 <= read_data2[`tel_start:`tel_end];
+                      la_ptr1 <= read_data2[`hed_start:`hed_end];
+                      la_ptr2 <= 0;
+                      la_index <= 0;
+                      la_small_value <= read_data1[`hed_start:`hed_end];
+                      la_compare_small <= 1'b1;
+                      func <= FUNC_LA;
+                      state <= LA_INIT;
+                    end else begin
+                      write_value <= `NO;
+                      func <= FUNC_RETURN;
+                      state <= RETURN_INIT;
+                    end
+                  end
+                end else if(read_data1[`hed_tag:`tel_tag] 
                 != read_data2[`hed_tag:`tel_tag]) begin
                   debug_sig <=2;
                   write_value <= `NO;
@@ -477,6 +552,96 @@ module equal_block (
               trav2_B <= trav2_P;
               func <= FUNC_WRITE;
               state <= WRITE_INIT;
+            end
+          endcase
+        end
+
+        FUNC_LA: begin
+          case (state)
+            LA_INIT: begin
+              if (la_compare_small) begin
+                if (la_len1 != `noun_width'h1) begin
+                  write_value <= `NO;
+                  func <= FUNC_RETURN;
+                  state <= RETURN_INIT;
+                end else begin
+                  state <= LA_READ;
+                end
+              end else begin
+                if (la_len1 != la_len2 || la_len1 == 0) begin
+                  write_value <= `NO;
+                  func <= FUNC_RETURN;
+                  state <= RETURN_INIT;
+                end else begin
+                  state <= LA_READ;
+                end
+              end
+            end
+
+            LA_READ: begin
+              address1 <= la_ptr1;
+              address2 <= la_ptr2;
+              mem_func <= `GET_CONTENTS;
+              mem_execute <= 1;
+              state <= LA_WAIT;
+            end
+
+            LA_WAIT: begin
+              if (mem_ready) begin
+                if (la_compare_small) begin
+                  if (read_data1[`hed_tag] != `ATOM
+                  || read_data1[`hed_start:`hed_end] != la_small_value
+                  || read_data1[`tel_tag] != `ATOM
+                  || read_data1[`tel_start:`tel_end] != `NIL) begin
+                    write_value <= `NO;
+                    func <= FUNC_RETURN;
+                    state <= RETURN_INIT;
+                  end else begin
+                    if(trav1_B != `NIL) mem_addr1 <= trav1_B;
+                    if(trav2_B != `NIL) mem_addr2 <= trav2_B;
+                    func <= FUNC_TRAVERSE;
+                    state <= TRAVERSE_POP;
+                  end
+                end else begin
+                  if (read_data1[`hed_tag] != `ATOM
+                  || read_data2[`hed_tag] != `ATOM
+                  || read_data1[`hed_start:`hed_end]
+                  != read_data2[`hed_start:`hed_end]) begin
+                    write_value <= `NO;
+                    func <= FUNC_RETURN;
+                    state <= RETURN_INIT;
+                  end else if (la_index == la_len1 - 1) begin
+                    if (read_data1[`tel_tag] != `ATOM
+                    || read_data1[`tel_start:`tel_end] != `NIL
+                    || read_data2[`tel_tag] != `ATOM
+                    || read_data2[`tel_start:`tel_end] != `NIL) begin
+                      write_value <= `NO;
+                      func <= FUNC_RETURN;
+                      state <= RETURN_INIT;
+                    end else begin
+                      if(trav1_B != `NIL) mem_addr1 <= trav1_B;
+                      if(trav2_B != `NIL) mem_addr2 <= trav2_B;
+                      func <= FUNC_TRAVERSE;
+                      state <= TRAVERSE_POP;
+                    end
+                  end else begin
+                    if (read_data1[`tel_tag] != `CELL
+                    || read_data2[`tel_tag] != `CELL) begin
+                      write_value <= `NO;
+                      func <= FUNC_RETURN;
+                      state <= RETURN_INIT;
+                    end else begin
+                      la_ptr1 <= read_data1[`tel_start:`tel_end];
+                      la_ptr2 <= read_data2[`tel_start:`tel_end];
+                      la_index <= la_index + 1'b1;
+                      state <= LA_READ;
+                    end
+                  end
+                end
+              end else begin
+                mem_func <= 0;
+                mem_execute <= 0;
+              end
             end
           endcase
         end

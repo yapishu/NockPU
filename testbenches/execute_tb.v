@@ -38,6 +38,8 @@ module execute_tb();
 //parameter MEM_INIT_FILE = "./memory/opcode9_9201.hex";
 //parameter MEM_INIT_FILE = "./memory/wtf.hex";
 parameter MEM_INIT_FILE = "./memory/decrement.hex";
+parameter integer MAX_CYCLES = 0;
+parameter DUMP_MEM_FILE = "";
 //parameter MEM_INIT_FILE = "./memory/ackerman_1_2.hex";
 //parameter MEM_INIT_FILE = "./memory/add.hex";
 //parameter MEM_INIT_FILE = "./memory/cap.hex";
@@ -402,14 +404,16 @@ integer idx;
 // Perform Test
 initial begin
   if (MEM_INIT_FILE != "") begin
-    $readmemh(MEM_INIT_FILE, mem.ram.ram);
+    $readmemh(MEM_INIT_FILE, mem.ram.ram, 0, 2047);
   end
+`ifndef NO_VCD
   $dumpfile("waveform.vcd");
   $dumpvars(0, execute_tb);
 
   for (idx = 0; idx < 2047; idx = idx+1) begin
     $dumpvars(0,mem.ram.ram[idx]);
   end
+`endif
 
   start_addr = 1;
   // Reset
@@ -420,11 +424,26 @@ initial begin
 
   traversal_execute = 1;
 
-  wait (traversal_finished == 1'b1);
+  if (MAX_CYCLES != 0) begin
+    for (idx = 0; idx < MAX_CYCLES && traversal_finished != 1'b1; idx = idx + 1) begin
+      @(posedge clk);
+    end
+    if (traversal_finished != 1'b1) begin
+      $display("timeout: traversal_finished not asserted after %0d cycles", MAX_CYCLES);
+      $finish;
+    end
+  end else begin
+    wait (traversal_finished == 1'b1);
+  end
   repeat (500) @(posedge clk);
 
   $display("ram[1] %x", mem.ram.ram[1]);
   $display("ram[1025] %x", mem.ram.ram[1025]);
+  $display("error %x", error);
+  $display("edit_error %x", edit_error);
+  if (DUMP_MEM_FILE != "") begin
+    $writememh(DUMP_MEM_FILE, mem.ram.ram, 0, 2047);
+  end
 
   $finish;
 end

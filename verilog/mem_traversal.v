@@ -38,9 +38,20 @@ module mem_traversal(
   reg [`noun_width - 1:0] hed, tel;
   reg [`memory_addr_width - 1:0] mem_addr;
   reg [`memory_data_width - 1:0] mem_data;
+  reg [`memory_addr_width - 1:0] exec_addr_reg;
   reg [7:0] debug_sig;
+  reg mem_ready_prev;
+  wire mem_ready_edge;
   wire is_running;
   assign is_running = !finished && execute;
+  assign mem_ready_edge = mem_ready && !mem_ready_prev;
+  localparam integer STACK_DEPTH = 2048;
+  reg [`memory_addr_width - 1:0] stack_addr [0:STACK_DEPTH - 1];
+  reg [`memory_addr_width - 1:0] stack_return [0:STACK_DEPTH - 1];
+  reg [`memory_addr_width:0] stack_ptr;
+  reg stack_exec_pending;
+  wire [`memory_addr_width:0] stack_top_idx;
+  assign stack_top_idx = stack_ptr - 1'b1;
 
   // General Purpose Regsiters
   reg [`memory_addr_width - 1:0] address_gp;
@@ -102,79 +113,100 @@ module mem_traversal(
       trav_P <= start_addr;
       mem_execute <= 0;
       gc_ready <= 0;
+      is_finished_reg <= 0;
       debug_sig <= 0;
       mux_controller <= `MUX_TRAVERSAL;
+      mem_ready_prev <= 0;
+      stack_ptr <= 0;
+      stack_exec_pending <= 0;
     end
     else if (execute) begin
+      mem_ready_prev <= mem_ready;
       case (sys_func)
         SYS_FUNC_EXECUTE: begin
           case(state)
             SYS_EXECUTE_INIT: begin
-              if(read_data1[`stack_bit] ==1) begin
-                debug_sig <= 7;
-                state <= SYS_EXECUTE_STACK;
-              end else begin
-                address1 <= mem_addr;
-                mem_func <= `GET_CONTENTS;
-                mem_execute <= 1;
-                debug_sig <= 3;
-                state <= SYS_EXECUTE_READ_ADDR;
-              end
+              is_finished_reg <= 0;
+              address1 <= mem_addr;
+              mem_func <= `GET_CONTENTS;
+              mem_execute <= 1;
+              debug_sig <= 3;
+              state <= SYS_EXECUTE_READ_ADDR;
             end
            SYS_EXECUTE_READ_ADDR: begin
-             if(mem_ready) begin
+             if(mem_ready_edge) begin
+               mem_data <= read_data1;
+               mem_tag <= read_data1[`tag_start:`tag_end];
+               hed <= read_data1[`hed_start:`hed_end];
+               tel <= read_data1[`tel_start:`tel_end];
+               exec_addr_reg <= mem_addr;
                if(trav_B != `NIL) mem_addr <= trav_B;
-                debug_sig <= 10;
-               module_address <= mem_addr;
-               module_data <= read_data1;
-               mux_controller <= `MUX_EXECUTE;
-               state <= SYS_EXECUTE_WAIT;
+               debug_sig <= 10;
+               if(read_data1[`stack_bit] == 1'b1) begin
+                 state <= SYS_EXECUTE_STACK;
+               end else begin
+                 module_address <= mem_addr;
+                 module_data <= read_data1;
+                 mux_controller <= `MUX_EXECUTE;
+                 state <= SYS_EXECUTE_WAIT;
+               end
              end else begin
                mem_func <= 0;
                mem_execute <= 0;
              end
            end
 
-           SYS_EXECUTE_WAIT: begin
-             if(module_finished) begin
+            SYS_EXECUTE_WAIT: begin
+              if(module_finished) begin
                mem_addr <= module_address;
                sys_func = execute_return_sys_func;
                state = execute_return_state;
                mux_controller <= `MUX_TRAVERSAL;
-             end
-           end
+              end
+            end
 
            SYS_EXECUTE_STACK_WAIT: begin
              if(module_finished) begin
-               sys_func = execute_return_sys_func;
-               state = execute_return_state;
+               if (stack_exec_pending) begin
+                 stack_ptr <= stack_ptr - 1'b1;
+                 trav_B <= stack_return[stack_top_idx];
+                 mem_addr <= stack_return[stack_top_idx];
+                 stack_exec_pending <= 0;
+                 sys_func <= SYS_FUNC_READ;
+                 state <= SYS_READ_INIT;
+               end else begin
+                 mem_addr <= module_address;
+                 sys_func = execute_return_sys_func;
+                 state = execute_return_state;
+               end
                mux_controller <= `MUX_TRAVERSAL;
              end
            end
 
            SYS_EXECUTE_STACK: begin
-             case(read_data1[`hed_start:`hed_end]) 
+             is_finished_reg <= 0;
+             case(mem_data[`hed_start:`hed_end]) 
                `cell: begin
-                 module_address <= mem_addr;
-                 module_data <= {mem_tag, hed, tel};//read_data1;
+                 module_address <= exec_addr_reg;
+                 module_data <= mem_data;
                  mux_controller <= `MUX_CELL;
                  state <= SYS_EXECUTE_STACK_WAIT;
                end
                `increment: begin
-                 module_address <= mem_addr;
-                 module_data <= {mem_tag, hed, tel};//read_data1;
+                 module_address <= exec_addr_reg;
+                 module_data <= mem_data;
                  mux_controller <= `MUX_INCR;
                  state <= SYS_EXECUTE_STACK_WAIT;
                end
                `equality: begin
-                 module_address <= mem_addr;
-                 module_data <= {mem_tag, hed, tel};//read_data1;
+                 module_address <= exec_addr_reg;
+                 module_data <= mem_data;
                  mux_controller <= `MUX_EQUAL;
                  state <= SYS_EXECUTE_STACK_WAIT;
                end
                `replace: begin
-                 module_address <= mem_addr;
-                 module_data <= {mem_tag, hed, tel};//read_data1;
+                 module_address <= exec_addr_reg;
+                 module_data <= mem_data;
                  mux_controller <= `MUX_EDIT;
                  state <= SYS_EXECUTE_STACK_WAIT;
                end
@@ -195,11 +227,23 @@ module mem_traversal(
           case(state)
             SYS_READ_INIT: begin
               debug_sig <= 1;
+              if (stack_ptr != 0 && mem_addr == stack_addr[stack_top_idx]) begin
+                is_finished_reg <= 0;
+                stack_exec_pending <= 1;
+                sys_func <= SYS_FUNC_EXECUTE;
+                state <= SYS_EXECUTE_INIT;
+              end
               // mem_addr is only max when you reach the end and use 
               // trav_b's inital value
-              if(mem_addr == 2047) begin 
+              else if(mem_addr == 2047) begin 
                 debug_sig <= 2;
-                if(gc) begin 
+                if (stack_ptr != 0) begin
+                  is_finished_reg <= 0;
+                  stack_exec_pending <= 1;
+                  mem_addr <= stack_addr[stack_top_idx];
+                  sys_func <= SYS_FUNC_EXECUTE;
+                  state <= SYS_EXECUTE_INIT;
+                end else if(gc) begin 
                   state <= SYS_READ_GC_WAIT;
                   gc_ready <= 1;
                 end else begin
@@ -233,7 +277,7 @@ module mem_traversal(
 
             SYS_READ_WAIT: begin
               gc_ready <= 0;
-              if(mem_ready) begin
+              if(mem_ready_edge) begin
                 debug_sig <= 6;
                 mem_data <= read_data1;
                 mem_tag <= read_data1[`tag_start:`tag_end];
@@ -261,7 +305,7 @@ module mem_traversal(
             end
 
             SYS_WRITE_WAIT: begin
-              if(mem_ready) begin
+              if(mem_ready_edge) begin
                   sys_func <= write_return_sys_func;
                   state <= write_return_state;
               end
@@ -278,6 +322,23 @@ module mem_traversal(
         SYS_FUNC_TRAVERSE: begin
           case(state)
             SYS_TRAVERSE_INIT: begin
+                if (mem_data[`stack_bit] == 1'b1) begin
+                  if (stack_ptr == STACK_DEPTH) begin
+                    state <= SYS_EXECUTE_ERROR;
+                  end else begin
+                    stack_addr[stack_ptr] <= mem_addr;
+                    stack_return[stack_ptr] <= trav_B;
+                    stack_ptr <= stack_ptr + 1'b1;
+                    trav_B <= mem_addr;
+                    mem_addr <= tel;
+                    sys_func <= SYS_FUNC_READ;
+                    state <= SYS_READ_INIT;
+                  end
+                end else if (mem_data[`large_atom_bit]) begin
+                  mem_addr <= trav_B;
+                  sys_func <= SYS_FUNC_READ;
+                  state <= SYS_READ_INIT;
+                end else begin
                 case(mem_tag[1:0])
                   `CELL_CELL: begin
                      // if the hed cell hasn't been visited we push into it
@@ -291,7 +352,7 @@ module mem_traversal(
                        //Store pointer to previous value in B
                        trav_P <= hed;
                        hed <= trav_B;
-                       trav_B <= trav_P;
+                       trav_B <= mem_addr;
                        //Write Data
                        sys_func <= SYS_FUNC_WRITE;
                        state <= SYS_WRITE_INIT;
@@ -337,8 +398,6 @@ module mem_traversal(
                   end
                   
                   `ATOM_CELL: begin
-                    // TODO if memtag[7:6] == 2'b11 then traverse 
-                    // if cell is not execute
                     if(mem_tag[2] == 1'b0) begin // if both were visited
                       // Set the command after write to traverse the tel
                       write_return_sys_func <= SYS_FUNC_TRAVERSE;
@@ -348,7 +407,7 @@ module mem_traversal(
                       //Store pointer to previous value in B
                       trav_P <= tel;
                       tel <= trav_B;
-                      trav_B <= trav_P;
+                      trav_B <= mem_addr;
                       //Write Data
                       sys_func <= SYS_FUNC_WRITE;
                       state <= SYS_WRITE_INIT;
@@ -382,7 +441,7 @@ module mem_traversal(
                       //Store pointer to previous value in B
                       trav_P <= hed;
                       hed <= trav_B;
-                      trav_B <= trav_P;
+                      trav_B <= mem_addr;
                       //Write Data
                       sys_func <= SYS_FUNC_WRITE;
                       state <= SYS_WRITE_INIT;
@@ -406,6 +465,7 @@ module mem_traversal(
                     end
                   end
                 endcase
+                end
             end
             SYS_TRAVERSE_PUSH: begin
               mem_addr <= trav_P;
@@ -425,7 +485,7 @@ module mem_traversal(
               //Store pointer to previous value in B
               trav_P <= tel;
               tel <= trav_B;
-              trav_B <= trav_P;
+              trav_B <= mem_addr;
               //Write Data
               sys_func <= SYS_FUNC_WRITE;
               state <= SYS_WRITE_INIT;

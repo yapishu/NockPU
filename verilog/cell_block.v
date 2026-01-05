@@ -72,7 +72,9 @@ module cell_block (
 
         READ_TEL: begin
           if (mem_ready) begin
-            if(read_data1[`tel_start:`tel_end] ==`NIL && read_data1[`tel_tag] == `ATOM && read_data1[`hed_tag] == `ATOM) begin
+            if (read_data1[`large_atom_bit]) begin
+              write_value <= `ATOM;
+            end else if(read_data1[`tel_start:`tel_end] ==`NIL && read_data1[`tel_tag] == `ATOM && read_data1[`hed_tag] == `ATOM) begin
           cell_debug_sig <=2;
               write_value <= `ATOM;
             end else begin
