@@ -29,6 +29,9 @@ module memory_unit(
   output wire [`memory_data_width - 1:0] mem_data_out2
 );
   reg [7:0] debug_sig;
+`ifdef TRACE_GC
+  reg gc_prev;
+`endif
   // Signal wires for this module
   reg is_ready_reg;
   assign is_ready = !execute && is_ready_reg;
@@ -120,6 +123,9 @@ module memory_unit(
     old_root <= 1;
     new_root <= memory_mask;
     need_mem <= (free_addr - old_root);
+`ifdef TRACE_GC
+    gc_prev <= 1'b0;
+`endif
   end
   else if (gc_ready && gc && (state != STATE_DUMP2 && state != STATE_DUMP && state != STATE_GC) ) begin
     state <= STATE_GC;
@@ -130,6 +136,12 @@ module memory_unit(
     mem_addr1 <= old_root;
   end
   else if (power) begin
+`ifdef TRACE_GC
+    if (gc && !gc_prev) begin
+      $display("gc asserted free_mem %0d old_root %0d new_root %0d", free_mem, old_root, new_root);
+    end
+    gc_prev <= gc;
+`endif
     case (state)
     // Initialize the free memory register
     STATE_INIT_SETUP: begin
@@ -179,11 +191,21 @@ module memory_unit(
         end
 
         `GET_FREE: begin
+`ifdef TRACE_FREE
+          $display("mmu get_free req write_data %0d free_mem %0d old_root %0d max_memory %0d",
+                   write_data,
+                   free_mem,
+                   old_root,
+                   max_memory);
+`endif
           need_mem <= (free_mem - old_root) + write_data;
           if((free_mem-old_root) + write_data <= max_memory) begin // if you have enough free memory
             free_addr <= free_mem;
             free_mem <= free_mem + write_data;
             state <= STATE_FREE_WAIT;
+`ifdef TRACE_FREE
+            $display("mmu get_free ok free_addr %0d new_free_mem %0d", free_mem, free_mem + write_data);
+`endif
           end
           else begin
             state <= STATE_GC;

@@ -31,509 +31,518 @@ module mem_traversal(
   reg is_finished_reg;
   assign finished = is_finished_reg;
 
-  // Internal registers needed
-  reg [3:0] sys_func;
-  reg [3:0] state;
-  reg [`tag_width - 1:0] mem_tag;
-  reg [`noun_width - 1:0] hed, tel;
+  localparam integer STACK_DEPTH = 2048;
+  reg [`memory_addr_width - 1:0] trav_stack_addr [0:STACK_DEPTH - 1];
+  reg [1:0] trav_stack_state [0:STACK_DEPTH - 1];
+  reg [`memory_addr_width:0] trav_stack_ptr;
+  wire [`memory_addr_width:0] trav_stack_top_idx;
+  assign trav_stack_top_idx = trav_stack_ptr - 1'b1;
+
+  localparam TRAV_ENTER     = 2'b00,
+             TRAV_AFTER_HED = 2'b01,
+             TRAV_AFTER_TEL = 2'b10;
+
   reg [`memory_addr_width - 1:0] mem_addr;
   reg [`memory_data_width - 1:0] mem_data;
-  reg [`memory_addr_width - 1:0] exec_addr_reg;
-  reg [7:0] debug_sig;
+  reg [`tag_width - 1:0] mem_tag;
+  reg [`noun_width - 1:0] hed, tel;
+
   reg mem_ready_prev;
   wire mem_ready_edge;
-  wire is_running;
-  assign is_running = !finished && execute;
   assign mem_ready_edge = mem_ready && !mem_ready_prev;
-  localparam integer STACK_DEPTH = 2048;
-  reg [`memory_addr_width - 1:0] stack_addr [0:STACK_DEPTH - 1];
-  reg [`memory_addr_width - 1:0] stack_return [0:STACK_DEPTH - 1];
-  reg [`memory_addr_width:0] stack_ptr;
-  reg stack_exec_pending;
-  wire [`memory_addr_width:0] stack_top_idx;
-  assign stack_top_idx = stack_ptr - 1'b1;
-  reg [`memory_addr_width - 1:0] atom_stack [0:STACK_DEPTH - 1];
-  reg [`memory_addr_width:0] atom_stack_ptr;
-  wire [`memory_addr_width:0] atom_stack_top_idx;
-  assign atom_stack_top_idx = atom_stack_ptr - 1'b1;
-  reg [`memory_addr_width - 1:0] cell_stack [0:STACK_DEPTH - 1];
-  reg [`memory_addr_width:0] cell_stack_ptr;
-  wire [`memory_addr_width:0] cell_stack_top_idx;
-  assign cell_stack_top_idx = cell_stack_ptr - 1'b1;
 
-  // General Purpose Regsiters
-  reg [`memory_addr_width - 1:0] address_gp;
-  reg [`memory_data_width - 1:0] mem_data_gp;
-  reg [`noun_width - 1:0] noun_gp;
-  reg [`noun_tag_width - 1:0] noun_tag_gp;
+  reg exec_pop_pending;
+  reg [2:0] active_module;
 
-  // Traversal Registers needed
-  reg [`noun_width - 1:0] trav_P;
-  reg [`noun_width - 1:0] trav_B;
+  reg [3:0] state;
+  localparam STATE_IDLE      = 4'h0,
+             STATE_READ      = 4'h1,
+             STATE_WAIT      = 4'h2,
+             STATE_PROCESS   = 4'h3,
+             STATE_EXEC_WAIT = 4'h4,
+             STATE_GC_WAIT   = 4'h5,
+             STATE_FINISH_WAIT = 4'h6;
 
-  // Write Registers needed
-  reg [3:0] write_return_sys_func;
-  reg [3:0] write_return_state;
+  localparam integer MEM_DEPTH = 1 << `memory_addr_width;
+  reg [MEM_DEPTH - 1:0] in_stack;
+  wire hed_is_cell;
+  wire tel_is_cell;
+  wire [`memory_addr_width - 1:0] hed_addr;
+  wire [`memory_addr_width - 1:0] tel_addr;
+  wire hed_is_cell_trav;
+  wire tel_is_cell_trav;
+  wire is_stack_node;
+  wire is_exec_node;
+  wire is_large_atom;
+  assign hed_is_cell = (mem_tag[1] == `CELL);
+  assign tel_is_cell = (mem_tag[0] == `CELL);
+  assign hed_addr = hed[`memory_addr_width - 1:0];
+  assign tel_addr = tel[`memory_addr_width - 1:0];
+  assign hed_is_cell_trav = hed_is_cell && !in_stack[hed_addr];
+  assign tel_is_cell_trav = tel_is_cell && !in_stack[tel_addr];
+  assign is_stack_node = mem_data[`stack_bit];
+  assign is_exec_node = mem_data[`execute_bit];
+  assign is_large_atom = mem_data[`large_atom_bit];
 
-  //System Level Functions
-  parameter SYS_FUNC_READ     = 4'h0,
-            SYS_FUNC_WRITE    = 4'h1,
-            SYS_FUNC_TRAVERSE = 4'h2,
-            SYS_FUNC_EXECUTE  = 4'h3,
-            SYS_FUNC_OPER     = 4'h4;
-
-  // Read States
-  parameter SYS_READ_INIT   = 4'h0,
-            SYS_READ_WAIT   = 4'h1,
-            SYS_READ_DECODE = 4'h2,
-            SYS_READ_GC_WAIT= 4'h3;
-
-  // Write States
-  parameter SYS_WRITE_INIT = 4'h0,
-            SYS_WRITE_WAIT = 4'h1;
-
-  // Traverse States
-  parameter SYS_TRAVERSE_INIT  = 4'h0,
-            SYS_TRAVERSE_PUSH  = 4'h1,
-            SYS_TRAVERSE_POP   = 4'h2,
-            SYS_TRAVERSE_TEL   = 4'h3;
-
-  // Execute States
-  parameter SYS_EXECUTE_INIT       = 4'h0,
-            SYS_EXECUTE_WAIT       = 4'h1,
-            SYS_EXECUTE_DECODE     = 4'h2,
-            SYS_EXECUTE_READ_ADDR  = 4'h3,
-            SYS_EXECUTE_STACK      = 4'h4,
-            SYS_EXECUTE_STACK_WAIT = 4'h5,
-            SYS_EXECUTE_ERROR      = 4'hF;
-
-  // Operation States
-  parameter SYS_OPER_INIT          = 4'h0,
-            SYS_OPER_READ_TEL      = 4'h1,
-            SYS_OPER_READ_TELTEL   = 4'h2;
-
-  always@(posedge clk or negedge rst) begin
-    if(!rst) begin
-      sys_func <= SYS_FUNC_READ;
-      state <= SYS_READ_INIT;
-      mem_addr <= start_addr;
-      trav_B <= `NIL;
-      trav_P <= start_addr;
-      mem_execute <= 0;
-      gc_ready <= 0;
-      is_finished_reg <= 0;
-      debug_sig <= 0;
+  always @(posedge clk or negedge rst) begin
+    if (!rst) begin
+      is_finished_reg <= 1'b0;
+      gc_ready <= 1'b0;
+      mem_execute <= 1'b0;
+      mem_func <= 0;
+      address1 <= 0;
+      address2 <= 0;
+      write_data <= 0;
+      module_address <= 0;
+      module_data <= 0;
       mux_controller <= `MUX_TRAVERSAL;
-      mem_ready_prev <= 0;
-      stack_ptr <= 0;
-      stack_exec_pending <= 0;
-      atom_stack_ptr <= 0;
-      cell_stack_ptr <= 0;
-    end
-    else if (execute) begin
+      mem_addr <= 0;
+      mem_data <= 0;
+      mem_tag <= 0;
+      hed <= 0;
+      tel <= 0;
+      mem_ready_prev <= 1'b0;
+      trav_stack_ptr <= 0;
+      in_stack <= {MEM_DEPTH{1'b0}};
+      exec_pop_pending <= 1'b0;
+      active_module <= `MUX_TRAVERSAL;
+      state <= STATE_IDLE;
+    end else if (execute) begin
       mem_ready_prev <= mem_ready;
-      case (sys_func)
-        SYS_FUNC_EXECUTE: begin
-          case(state)
-            SYS_EXECUTE_INIT: begin
-              is_finished_reg <= 0;
-              address1 <= mem_addr;
+      case (state)
+        STATE_IDLE: begin
+          is_finished_reg <= 1'b0;
+          mux_controller <= `MUX_TRAVERSAL;
+          gc_ready <= 1'b0;
+          exec_pop_pending <= 1'b0;
+          active_module <= `MUX_TRAVERSAL;
+          mem_execute <= 1'b0;
+          mem_func <= 0;
+          if (gc) begin
+            trav_stack_ptr <= 0;
+            gc_ready <= 1'b1;
+            state <= STATE_GC_WAIT;
+          end else if (trav_stack_ptr == 0) begin
+            trav_stack_addr[0] <= start_addr;
+            trav_stack_state[0] <= TRAV_ENTER;
+            trav_stack_ptr <= 1;
+            in_stack <= {MEM_DEPTH{1'b0}};
+            in_stack[start_addr] <= 1'b1;
+            mem_addr <= start_addr;
+            address1 <= start_addr;
+            address2 <= 0;
+            mem_func <= `GET_CONTENTS;
+            mem_execute <= 1'b1;
+            state <= STATE_WAIT;
+          end
+        end
+
+        STATE_READ: begin
+          if (trav_stack_ptr == 0) begin
+            is_finished_reg <= 1'b0;
+            address1 <= start_addr;
+            address2 <= 0;
+            mem_func <= `GET_CONTENTS;
+            mem_execute <= 1'b1;
+            state <= STATE_FINISH_WAIT;
+          end else begin
+            mem_addr <= trav_stack_addr[trav_stack_top_idx];
+            address1 <= trav_stack_addr[trav_stack_top_idx];
+            address2 <= 0;
+            mem_func <= `GET_CONTENTS;
+            mem_execute <= 1'b1;
+            state <= STATE_WAIT;
+          end
+        end
+
+        STATE_WAIT: begin
+          gc_ready <= 1'b0;
+          if (mem_ready_edge) begin
+            mem_data <= read_data1;
+            mem_tag <= read_data1[`tag_start:`tag_end];
+            hed <= read_data1[`hed_start:`hed_end];
+            tel <= read_data1[`tel_start:`tel_end];
+            mem_execute <= 1'b0;
+            mem_func <= 0;
+            state <= STATE_PROCESS;
+          end else begin
+            mem_execute <= 1'b0;
+            mem_func <= 0;
+          end
+        end
+
+        STATE_PROCESS: begin
+          if (gc) begin
+            trav_stack_ptr <= 0;
+            in_stack <= {MEM_DEPTH{1'b0}};
+            exec_pop_pending <= 1'b0;
+            gc_ready <= 1'b1;
+            mem_execute <= 1'b0;
+            mem_func <= 0;
+            state <= STATE_GC_WAIT;
+          end else if (trav_stack_ptr == 0) begin
+            is_finished_reg <= 1'b0;
+            address1 <= start_addr;
+            address2 <= 0;
+            mem_func <= `GET_CONTENTS;
+            mem_execute <= 1'b1;
+            state <= STATE_FINISH_WAIT;
+          end else if (is_large_atom) begin
+            if (trav_stack_ptr == 1) begin
+              is_finished_reg <= 1'b0;
+              address1 <= start_addr;
+              address2 <= 0;
               mem_func <= `GET_CONTENTS;
-              mem_execute <= 1;
-              debug_sig <= 3;
-              state <= SYS_EXECUTE_READ_ADDR;
+              mem_execute <= 1'b1;
+              state <= STATE_FINISH_WAIT;
+            end else begin
+              trav_stack_ptr <= trav_stack_ptr - 1'b1;
+              in_stack[trav_stack_addr[trav_stack_top_idx]] <= 1'b0;
+              mem_addr <= trav_stack_addr[trav_stack_top_idx - 1'b1];
+              state <= STATE_READ;
             end
-           SYS_EXECUTE_READ_ADDR: begin
-             if(mem_ready_edge) begin
-               mem_data <= read_data1;
-               mem_tag <= read_data1[`tag_start:`tag_end];
-               hed <= read_data1[`hed_start:`hed_end];
-               tel <= read_data1[`tel_start:`tel_end];
-               exec_addr_reg <= mem_addr;
-               if(trav_B != `NIL) mem_addr <= trav_B;
-               debug_sig <= 10;
-               if(read_data1[`stack_bit] == 1'b1) begin
-                 state <= SYS_EXECUTE_STACK;
-               end else begin
-                 module_address <= mem_addr;
-                 module_data <= read_data1;
-                 mux_controller <= `MUX_EXECUTE;
-                 state <= SYS_EXECUTE_WAIT;
-               end
-             end else begin
-               mem_func <= 0;
-               mem_execute <= 0;
-             end
-           end
-
-            SYS_EXECUTE_WAIT: begin
-              if(module_finished) begin
-               mem_addr <= module_address;
-               sys_func = execute_return_sys_func;
-               state = execute_return_state;
-               mux_controller <= `MUX_TRAVERSAL;
-              end
-            end
-
-           SYS_EXECUTE_STACK_WAIT: begin
-             if(module_finished) begin
-               if (stack_exec_pending) begin
-                 stack_ptr <= stack_ptr - 1'b1;
-                 trav_B <= stack_return[stack_top_idx];
-                 mem_addr <= stack_return[stack_top_idx];
-                 stack_exec_pending <= 0;
-                 sys_func <= SYS_FUNC_READ;
-                 state <= SYS_READ_INIT;
-               end else begin
-                 mem_addr <= module_address;
-                 sys_func = execute_return_sys_func;
-                 state = execute_return_state;
-               end
-               mux_controller <= `MUX_TRAVERSAL;
-             end
-           end
-
-           SYS_EXECUTE_STACK: begin
-             is_finished_reg <= 0;
-             case(mem_data[`hed_start:`hed_end]) 
-               `cell: begin
-                 module_address <= exec_addr_reg;
-                 module_data <= mem_data;
-                 mux_controller <= `MUX_CELL;
-                 state <= SYS_EXECUTE_STACK_WAIT;
-               end
-               `increment: begin
-                 module_address <= exec_addr_reg;
-                 module_data <= mem_data;
-                 mux_controller <= `MUX_INCR;
-                 state <= SYS_EXECUTE_STACK_WAIT;
-               end
-               `equality: begin
-                 module_address <= exec_addr_reg;
-                 module_data <= mem_data;
-                 mux_controller <= `MUX_EQUAL;
-                 state <= SYS_EXECUTE_STACK_WAIT;
-               end
-               `replace: begin
-                 module_address <= exec_addr_reg;
-                 module_data <= mem_data;
-                 mux_controller <= `MUX_EDIT;
-                 state <= SYS_EXECUTE_STACK_WAIT;
-               end
-               default: begin
-                 state <= SYS_EXECUTE_ERROR;
-               end
-             endcase
-           end
-
-           SYS_EXECUTE_ERROR: begin
-             state <= SYS_EXECUTE_ERROR;
-             is_finished_reg <= 1;
-           end
-          endcase
-        end
-
-        SYS_FUNC_READ: begin
-          case(state)
-            SYS_READ_INIT: begin
-              debug_sig <= 1;
-              if (gc) begin
-                state <= SYS_READ_GC_WAIT;
-                gc_ready <= 1;
-              end
-              else if (stack_ptr != 0 && mem_addr == stack_addr[stack_top_idx]) begin
-                is_finished_reg <= 0;
-                stack_exec_pending <= 1;
-                sys_func <= SYS_FUNC_EXECUTE;
-                state <= SYS_EXECUTE_INIT;
-              end
-              // mem_addr is only max when you reach the end and use 
-              // trav_b's inital value
-              else if(mem_addr == 2047) begin 
-                debug_sig <= 2;
-                if (stack_ptr != 0) begin
-                  is_finished_reg <= 0;
-                  stack_exec_pending <= 1;
-                  mem_addr <= stack_addr[stack_top_idx];
-                  sys_func <= SYS_FUNC_EXECUTE;
-                  state <= SYS_EXECUTE_INIT;
-                end else if(gc) begin 
-                  state <= SYS_READ_GC_WAIT;
-                  gc_ready <= 1;
-                end else begin
-                  is_finished_reg <= 1;
-                end
-              end
-              else begin
-                is_finished_reg <= 0;
-                address1 <= mem_addr;
-                mem_func <= `GET_CONTENTS;
-                mem_execute <= 1;
-                state <= SYS_READ_WAIT;
-              end
-            end
-
-            SYS_READ_GC_WAIT: begin
-              debug_sig <= 6;
-              if(!gc && gc_ready) begin
-                debug_sig <= 10;
-                mem_addr <= read_data1;
-                trav_P <= read_data1;
-                trav_B <= `NIL;
-                stack_ptr <= 0;
-                stack_exec_pending <= 0;
-                gc_ready <= 0;
-                is_finished_reg <= 0;
-                address1 <= read_data1;
-                mem_func <= `GET_CONTENTS;
-                mem_execute <= 1;
-                state <= SYS_READ_WAIT;
-                //state <= SYS_READ_INIT;
-              end 
-            end
-
-            SYS_READ_WAIT: begin
-              gc_ready <= 0;
-              if(mem_ready_edge) begin
-                debug_sig <= 6;
-                mem_data <= read_data1;
-                mem_tag <= read_data1[`tag_start:`tag_end];
-                hed <= read_data1[`hed_start:`hed_end];
-                tel <= read_data1[`tel_start:`tel_end];
-                sys_func <= SYS_FUNC_TRAVERSE;
-                state <= SYS_TRAVERSE_INIT;
-              end
-              else begin
-                mem_func <= 0;
-                mem_execute <= 0;
-              end
-            end
-          endcase
-        end
-
-        SYS_FUNC_WRITE: begin
-          case(state)
-            SYS_WRITE_INIT: begin
-              address1 <= mem_addr;
-              write_data <= {mem_tag, hed, tel};
-              mem_func <= `SET_CONTENTS;
-              mem_execute <= 1;
-              state <= SYS_WRITE_WAIT;
-            end
-
-            SYS_WRITE_WAIT: begin
-              if(mem_ready_edge) begin
-                  sys_func <= write_return_sys_func;
-                  state <= write_return_state;
-              end
-              else begin
-                address1 <= 0;
-                write_data <= 0;
-                mem_func <= 0;
-                mem_execute <= 0;
-              end
-            end
-          endcase
-        end
-
-        SYS_FUNC_TRAVERSE: begin
-          case(state)
-            SYS_TRAVERSE_INIT: begin
-                if (mem_data[`stack_bit] == 1'b1) begin
-                  if (stack_ptr == STACK_DEPTH) begin
-                    state <= SYS_EXECUTE_ERROR;
+          end else begin
+            case (trav_stack_state[trav_stack_top_idx])
+              TRAV_ENTER: begin
+                if (is_stack_node) begin
+                  if (tel_is_cell_trav) begin
+                    trav_stack_state[trav_stack_top_idx] <= TRAV_AFTER_TEL;
+                    if (trav_stack_ptr == STACK_DEPTH) begin
+`ifdef TRACE_TRAV
+                      $display("trav stack overflow at addr %0d data %h",
+                               mem_addr,
+                               mem_data);
+`endif
+                      is_finished_reg <= 1'b1;
+                      state <= STATE_IDLE;
+                    end else begin
+                      trav_stack_addr[trav_stack_ptr] <= tel;
+                      trav_stack_state[trav_stack_ptr] <= TRAV_ENTER;
+                      trav_stack_ptr <= trav_stack_ptr + 1'b1;
+                      in_stack[tel_addr] <= 1'b1;
+                      mem_addr <= tel;
+                      state <= STATE_READ;
+                    end
                   end else begin
-                    stack_addr[stack_ptr] <= mem_addr;
-                    stack_return[stack_ptr] <= trav_B;
-                    stack_ptr <= stack_ptr + 1'b1;
-                    trav_B <= mem_addr;
+                    if (!gc) begin
+                      exec_pop_pending <= 1'b1;
+                      module_address <= mem_addr;
+                      module_data <= mem_data;
+                      case (mem_data[`hed_start:`hed_end])
+                        `cell: begin
+                          mux_controller <= `MUX_CELL;
+                          active_module <= `MUX_CELL;
+                        end
+                        `increment: begin
+                          mux_controller <= `MUX_INCR;
+                          active_module <= `MUX_INCR;
+                        end
+                        `equality: begin
+                          mux_controller <= `MUX_EQUAL;
+                          active_module <= `MUX_EQUAL;
+                        end
+                        `replace: begin
+                          mux_controller <= `MUX_EDIT;
+                          active_module <= `MUX_EDIT;
+                        end
+                        default: begin
+`ifdef TRACE_TRAV
+                          $display("trav unknown stack opcode addr %0d data %h",
+                                   mem_addr,
+                                   mem_data);
+`endif
+                          is_finished_reg <= 1'b1;
+                          state <= STATE_IDLE;
+                          mux_controller <= `MUX_TRAVERSAL;
+                          active_module <= `MUX_TRAVERSAL;
+                        end
+                      endcase
+                      if (!is_finished_reg) begin
+                        state <= STATE_EXEC_WAIT;
+                      end
+                    end else begin
+                      trav_stack_ptr <= trav_stack_ptr - 1'b1;
+                      in_stack[trav_stack_addr[trav_stack_top_idx]] <= 1'b0;
+                      state <= STATE_READ;
+                    end
+                  end
+                end else if (hed_is_cell_trav) begin
+                  trav_stack_state[trav_stack_top_idx] <= TRAV_AFTER_HED;
+                  if (trav_stack_ptr == STACK_DEPTH) begin
+`ifdef TRACE_TRAV
+                    $display("trav stack overflow at addr %0d data %h",
+                             mem_addr,
+                             mem_data);
+`endif
+                    is_finished_reg <= 1'b1;
+                    state <= STATE_IDLE;
+                  end else begin
+                    trav_stack_addr[trav_stack_ptr] <= hed;
+                    trav_stack_state[trav_stack_ptr] <= TRAV_ENTER;
+                    trav_stack_ptr <= trav_stack_ptr + 1'b1;
+                    in_stack[hed_addr] <= 1'b1;
+                    mem_addr <= hed;
+                    state <= STATE_READ;
+                  end
+                end else if (tel_is_cell_trav) begin
+                  trav_stack_state[trav_stack_top_idx] <= TRAV_AFTER_TEL;
+                  if (trav_stack_ptr == STACK_DEPTH) begin
+`ifdef TRACE_TRAV
+                    $display("trav stack overflow at addr %0d data %h",
+                             mem_addr,
+                             mem_data);
+`endif
+                    is_finished_reg <= 1'b1;
+                    state <= STATE_IDLE;
+                  end else begin
+                    trav_stack_addr[trav_stack_ptr] <= tel;
+                    trav_stack_state[trav_stack_ptr] <= TRAV_ENTER;
+                    trav_stack_ptr <= trav_stack_ptr + 1'b1;
+                    in_stack[tel_addr] <= 1'b1;
                     mem_addr <= tel;
-                    sys_func <= SYS_FUNC_READ;
-                    state <= SYS_READ_INIT;
+                    state <= STATE_READ;
                   end
-                end else if (mem_data[`large_atom_bit]) begin
-                  mem_addr <= trav_B;
-                  sys_func <= SYS_FUNC_READ;
-                  state <= SYS_READ_INIT;
                 end else begin
-                case(mem_tag[1:0])
-                  `CELL_CELL: begin
-                     // if the hed cell hasn't been visited we push into it
-                     if(mem_tag[3:2] == 2'b00) begin 
-                       // Verified
-                       // Set the command after write to traverse the hed
-                       write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                       write_return_state <= SYS_TRAVERSE_PUSH;
-                       //set tag to visited hed
-                       mem_tag[3] <= 1;
-                       //Store pointer to previous value in B
-                       trav_P <= hed;
-                       hed <= trav_B;
-                       trav_B <= mem_addr;
-                       //Write Data
-                       sys_func <= SYS_FUNC_WRITE;
-                       state <= SYS_WRITE_INIT;
-                     end
-                     else if(mem_tag[3:2] == 2'b10) begin // if hed was visited and tel wasnt
-                       // Verified
-                       // Set the command after write to traverse the tel
-                       write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                       write_return_state <= SYS_TRAVERSE_PUSH;
-                       //pop the hed
-                       trav_B <= hed;
-                       trav_P <= trav_B;
-                       debug_sig <= 11;
-                       hed <= trav_P;
-                       //Wait for a clock cycle to push the tel
-                       state <= SYS_TRAVERSE_TEL;
-                     end
-                     else if(mem_tag[3:2] == 2'b11) begin // if both were visited
-                       // Set the command after write to pop
-                       if(mem_tag[7] == 1 && gc == 0) begin // If we still need to execute
-                         debug_sig <= 4;
-                         write_return_sys_func <= SYS_FUNC_EXECUTE;
-                         write_return_state <= SYS_EXECUTE_INIT;
-                       end else begin
-                         write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                         write_return_state <= SYS_TRAVERSE_POP;
-                       end
-                       mem_tag[3:2] <= 2'b00;
-                       trav_B <= tel;
-                       trav_P <= trav_B;
-                       tel <= trav_P;
-                       //Write Data
-                       sys_func <= SYS_FUNC_WRITE;
-                       state <= SYS_WRITE_INIT;
-                    end
+                  if (is_exec_node && !gc) begin
+                    exec_pop_pending <= 1'b1;
+                    active_module <= `MUX_EXECUTE;
+                    module_address <= mem_addr;
+                    module_data <= mem_data;
+                    mux_controller <= `MUX_EXECUTE;
+                    state <= STATE_EXEC_WAIT;
+                  end else if (trav_stack_ptr == 1) begin
+                    is_finished_reg <= 1'b0;
+                    address1 <= start_addr;
+                    address2 <= 0;
+                    mem_func <= `GET_CONTENTS;
+                    mem_execute <= 1'b1;
+                    state <= STATE_FINISH_WAIT;
+                  end else begin
+                    trav_stack_ptr <= trav_stack_ptr - 1'b1;
+                    in_stack[trav_stack_addr[trav_stack_top_idx]] <= 1'b0;
+                    mem_addr <= trav_stack_addr[trav_stack_top_idx - 1'b1];
+                    state <= STATE_READ;
                   end
-
-                  `ATOM_ATOM: begin
-                    // Pop
-                    mem_addr <= trav_B;
-                    sys_func <= SYS_FUNC_READ;
-                    state <= SYS_READ_INIT;
-                  end
-                  
-                  `ATOM_CELL: begin
-                    if(mem_tag[2] == 1'b0) begin // if both were visited
-                      if (atom_stack_ptr == STACK_DEPTH) begin
-                        state <= SYS_EXECUTE_ERROR;
-                      end else begin
-                        atom_stack[atom_stack_ptr] <= tel;
-                        atom_stack_ptr <= atom_stack_ptr + 1'b1;
-                        // Set the command after write to traverse the tel
-                        write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                        write_return_state <= SYS_TRAVERSE_PUSH;
-                        //set tag to visited tel
-                        mem_tag[2] <= 1;
-                        //Store pointer to previous value in B
-                        trav_P <= tel;
-                        tel <= trav_B;
-                        trav_B <= mem_addr;
-                        //Write Data
-                        sys_func <= SYS_FUNC_WRITE;
-                        state <= SYS_WRITE_INIT;
-                      end
-                    end
-                    else begin
-                      if (atom_stack_ptr == 0) begin
-                        state <= SYS_EXECUTE_ERROR;
-                      end else begin
-                        // Set the command after write to pop
-                        if(mem_tag[7] == 1'b1 && gc == 0) begin // If we still need to execute
-                          write_return_sys_func <= SYS_FUNC_EXECUTE;
-                          write_return_state <= SYS_EXECUTE_INIT;
-                        end else begin
-                          write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                          write_return_state <= SYS_TRAVERSE_POP;
-                        end
-                        mem_tag[3:2] <= 2'b00;
-                        trav_B <= tel;
-                        trav_P <= trav_B;
-                        tel <= atom_stack[atom_stack_top_idx];
-                        atom_stack_ptr <= atom_stack_ptr - 1'b1;
-                        //Write Data
-                        sys_func <= SYS_FUNC_WRITE;
-                        state <= SYS_WRITE_INIT;
-                      end
-                    end
-                  end
-                  `CELL_ATOM: begin
-                    // if the hed cell hasn't been visited we push into it
-                    if(mem_tag[3] == 0) begin 
-                      if (cell_stack_ptr == STACK_DEPTH) begin
-                        state <= SYS_EXECUTE_ERROR;
-                      end else begin
-                        cell_stack[cell_stack_ptr] <= hed;
-                        cell_stack_ptr <= cell_stack_ptr + 1'b1;
-                        // Set the command after write to traverse the hed
-                        write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                        write_return_state <= SYS_TRAVERSE_PUSH;
-                        //set tag to visited hed
-                        mem_tag[3] <= 1;
-                        //Store pointer to previous value in B
-                        trav_P <= hed;
-                        hed <= trav_B;
-                        trav_B <= mem_addr;
-                        //Write Data
-                        sys_func <= SYS_FUNC_WRITE;
-                        state <= SYS_WRITE_INIT;
-                      end
-                    end
-                    else begin
-                      if (cell_stack_ptr == 0) begin
-                        state <= SYS_EXECUTE_ERROR;
-                      end else begin
-                        // Set the command after write to pop
-                        if(mem_tag[7] == 1 && gc == 0) begin // If we still need to execute
-                          write_return_sys_func <= SYS_FUNC_EXECUTE;
-                          write_return_state <= SYS_EXECUTE_INIT;
-                        end else begin
-                          write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                          write_return_state <= SYS_TRAVERSE_POP;
-                        end
-                        mem_tag[3:2] <= 2'b00;
-                        trav_B <= hed;
-                        trav_P <= trav_B;
-                        hed <= cell_stack[cell_stack_top_idx];
-                        cell_stack_ptr <= cell_stack_ptr - 1'b1;
-                        //Write Data
-                        sys_func <= SYS_FUNC_WRITE;
-                        state <= SYS_WRITE_INIT;
-                      end
-                    end
-                  end
-                endcase
                 end
-            end
-            SYS_TRAVERSE_PUSH: begin
-              mem_addr <= trav_P;
-              sys_func <= SYS_FUNC_READ;
-              state <= SYS_READ_INIT;
-            end
+              end
 
-            SYS_TRAVERSE_POP: begin
-              mem_addr <= trav_B;
-              sys_func <= SYS_FUNC_READ;
-              state <= SYS_READ_INIT;
-            end
+              TRAV_AFTER_HED: begin
+                if (tel_is_cell_trav) begin
+                  trav_stack_state[trav_stack_top_idx] <= TRAV_AFTER_TEL;
+                  if (trav_stack_ptr == STACK_DEPTH) begin
+`ifdef TRACE_TRAV
+                    $display("trav stack overflow at addr %0d data %h",
+                             mem_addr,
+                             mem_data);
+`endif
+                    is_finished_reg <= 1'b1;
+                    state <= STATE_IDLE;
+                  end else begin
+                    trav_stack_addr[trav_stack_ptr] <= tel;
+                    trav_stack_state[trav_stack_ptr] <= TRAV_ENTER;
+                    trav_stack_ptr <= trav_stack_ptr + 1'b1;
+                    in_stack[tel_addr] <= 1'b1;
+                    mem_addr <= tel;
+                    state <= STATE_READ;
+                  end
+                end else if (is_exec_node && !gc) begin
+                  exec_pop_pending <= 1'b1;
+                  active_module <= `MUX_EXECUTE;
+                  module_address <= mem_addr;
+                  module_data <= mem_data;
+                  mux_controller <= `MUX_EXECUTE;
+                  state <= STATE_EXEC_WAIT;
+                end else begin
+                  if (trav_stack_ptr == 1) begin
+                    is_finished_reg <= 1'b0;
+                    address1 <= start_addr;
+                    address2 <= 0;
+                    mem_func <= `GET_CONTENTS;
+                    mem_execute <= 1'b1;
+                    state <= STATE_FINISH_WAIT;
+                  end else begin
+                    trav_stack_ptr <= trav_stack_ptr - 1'b1;
+                    in_stack[trav_stack_addr[trav_stack_top_idx]] <= 1'b0;
+                    mem_addr <= trav_stack_addr[trav_stack_top_idx - 1'b1];
+                    state <= STATE_READ;
+                  end
+                end
+              end
 
-            SYS_TRAVERSE_TEL: begin
-              //set tag to visited tel
-              mem_tag[2] <= 1;
-              //Store pointer to previous value in B
-              trav_P <= tel;
-              tel <= trav_B;
-              trav_B <= mem_addr;
-              //Write Data
-              sys_func <= SYS_FUNC_WRITE;
-              state <= SYS_WRITE_INIT;
-            end
-          endcase
+              TRAV_AFTER_TEL: begin
+                if ((is_exec_node || is_stack_node) && !gc) begin
+                  exec_pop_pending <= 1'b1;
+                  module_address <= mem_addr;
+                  module_data <= mem_data;
+                  if (is_stack_node) begin
+                    case (mem_data[`hed_start:`hed_end])
+                      `cell: begin
+                        mux_controller <= `MUX_CELL;
+                        active_module <= `MUX_CELL;
+                      end
+                      `increment: begin
+                        mux_controller <= `MUX_INCR;
+                        active_module <= `MUX_INCR;
+                      end
+                      `equality: begin
+                        mux_controller <= `MUX_EQUAL;
+                        active_module <= `MUX_EQUAL;
+                      end
+                      `replace: begin
+                        mux_controller <= `MUX_EDIT;
+                        active_module <= `MUX_EDIT;
+                      end
+                      default: begin
+`ifdef TRACE_TRAV
+                        $display("trav unknown stack opcode addr %0d data %h",
+                                 mem_addr,
+                                 mem_data);
+`endif
+                        is_finished_reg <= 1'b1;
+                        state <= STATE_IDLE;
+                        mux_controller <= `MUX_TRAVERSAL;
+                        active_module <= `MUX_TRAVERSAL;
+                      end
+                    endcase
+                    if (!is_finished_reg) begin
+                      state <= STATE_EXEC_WAIT;
+                    end
+                  end else begin
+                    active_module <= `MUX_EXECUTE;
+                    mux_controller <= `MUX_EXECUTE;
+                    state <= STATE_EXEC_WAIT;
+                  end
+                end else begin
+                  if (trav_stack_ptr == 1) begin
+                    is_finished_reg <= 1'b0;
+                    address1 <= start_addr;
+                    address2 <= 0;
+                    mem_func <= `GET_CONTENTS;
+                    mem_execute <= 1'b1;
+                    state <= STATE_FINISH_WAIT;
+                  end else begin
+                    trav_stack_ptr <= trav_stack_ptr - 1'b1;
+                    in_stack[trav_stack_addr[trav_stack_top_idx]] <= 1'b0;
+                    mem_addr <= trav_stack_addr[trav_stack_top_idx - 1'b1];
+                    state <= STATE_READ;
+                  end
+                end
+              end
+
+              default: begin
+                state <= STATE_IDLE;
+              end
+            endcase
+          end
         end
 
+        STATE_EXEC_WAIT: begin
+          if (module_finished) begin
+            if (active_module == `MUX_EXECUTE
+            && execute_return_sys_func == `SYS_FUNC_EXECUTE
+            && execute_return_state == `SYS_EXECUTE_ERROR) begin
+              is_finished_reg <= 1'b1;
+              state <= STATE_IDLE;
+              mux_controller <= `MUX_TRAVERSAL;
+              exec_pop_pending <= 1'b0;
+              active_module <= `MUX_TRAVERSAL;
+            end else if (trav_stack_ptr == 0) begin
+              mux_controller <= `MUX_TRAVERSAL;
+              exec_pop_pending <= 1'b0;
+              active_module <= `MUX_TRAVERSAL;
+              is_finished_reg <= 1'b0;
+              address1 <= start_addr;
+              address2 <= 0;
+              mem_func <= `GET_CONTENTS;
+              mem_execute <= 1'b1;
+              state <= STATE_FINISH_WAIT;
+            end else begin
+              mux_controller <= `MUX_TRAVERSAL;
+              exec_pop_pending <= 1'b0;
+              active_module <= `MUX_TRAVERSAL;
+              trav_stack_state[trav_stack_top_idx] <= TRAV_ENTER;
+              mem_addr <= trav_stack_addr[trav_stack_top_idx];
+              state <= STATE_READ;
+            end
+          end
+        end
+
+        STATE_GC_WAIT: begin
+          if (!gc && gc_ready) begin
+            gc_ready <= 1'b0;
+            trav_stack_ptr <= 0;
+            if (read_data1[`memory_addr_width - 1:0] != `NIL_ADDR) begin
+              trav_stack_addr[0] <= read_data1[`memory_addr_width - 1:0];
+              trav_stack_state[0] <= TRAV_ENTER;
+              trav_stack_ptr <= 1;
+              in_stack <= {MEM_DEPTH{1'b0}};
+              in_stack[read_data1[`memory_addr_width - 1:0]] <= 1'b1;
+              mem_addr <= read_data1[`memory_addr_width - 1:0];
+              address1 <= read_data1[`memory_addr_width - 1:0];
+              address2 <= 0;
+              mem_func <= `GET_CONTENTS;
+              mem_execute <= 1'b1;
+              state <= STATE_WAIT;
+            end else begin
+              is_finished_reg <= 1'b0;
+              address1 <= start_addr;
+              address2 <= 0;
+              mem_func <= `GET_CONTENTS;
+              mem_execute <= 1'b1;
+              state <= STATE_FINISH_WAIT;
+            end
+          end
+        end
+
+        STATE_FINISH_WAIT: begin
+          if (mem_ready_edge) begin
+            mem_execute <= 1'b0;
+            mem_func <= 0;
+`ifdef TRACE_FINISH
+            $display("finish check addr %0d data %h exec %0d stack %0d",
+                     start_addr,
+                     read_data1,
+                     read_data1[`execute_bit],
+                     read_data1[`stack_bit]);
+`endif
+            if (read_data1[`execute_bit] || read_data1[`stack_bit]) begin
+              is_finished_reg <= 1'b0;
+              trav_stack_ptr <= 1;
+              in_stack <= {MEM_DEPTH{1'b0}};
+              in_stack[start_addr] <= 1'b1;
+              trav_stack_addr[0] <= start_addr;
+              trav_stack_state[0] <= TRAV_ENTER;
+              mem_addr <= start_addr;
+              mem_data <= read_data1;
+              mem_tag <= read_data1[`tag_start:`tag_end];
+              hed <= read_data1[`hed_start:`hed_end];
+              tel <= read_data1[`tel_start:`tel_end];
+              state <= STATE_PROCESS;
+            end else begin
+              is_finished_reg <= 1'b1;
+              state <= STATE_IDLE;
+            end
+          end else begin
+            mem_execute <= 1'b0;
+            mem_func <= 0;
+          end
+        end
+
+        default: begin
+          state <= STATE_IDLE;
+        end
       endcase
+    end else begin
+      state <= STATE_IDLE;
+      is_finished_reg <= 1'b0;
+      gc_ready <= 1'b0;
+      mem_execute <= 1'b0;
+      mem_func <= 0;
+      mux_controller <= `MUX_TRAVERSAL;
+      trav_stack_ptr <= 0;
+      in_stack <= {MEM_DEPTH{1'b0}};
+      exec_pop_pending <= 1'b0;
+      active_module <= `MUX_TRAVERSAL;
     end
   end
-
 endmodule

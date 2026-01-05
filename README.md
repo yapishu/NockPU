@@ -24,6 +24,14 @@ This can be viewed using `gtkwave`:
 
 `gtkwave waveform.vcd`
 
+## Regression Tests
+
+You can run the Nock opcode regression suite (simulation + reference evaluator) with:
+
+`python3 scripts/regress_nock.py`
+
+This uses the `execute_tb` testbench with `+mem=...` and `+dump=...` plusargs, and checks output nouns against a software Nock evaluator.
+
 
 # Project Layout
 

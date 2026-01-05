@@ -399,12 +399,129 @@ initial begin
   forever MAX10_CLK1_50 = #10 ~MAX10_CLK1_50;
 end
 
+integer cycle_count;
+integer finish_cycle;
+reg print_cycles;
+reg stop_on_finish;
+
+always @(posedge clk) begin
+  if (!reset) begin
+    cycle_count <= 0;
+  end else begin
+    cycle_count <= cycle_count + 1;
+  end
+end
+
+`ifdef TRACE_GC
+reg gc_prev;
+reg gc_ready_prev;
+
+always @(posedge clk) begin
+  if (!reset) begin
+    gc_prev <= 1'b0;
+    gc_ready_prev <= 1'b0;
+  end else begin
+    if (gc && !gc_prev) begin
+      $display("gc start cycle %0d free_addr %0d", cycle_count, free_addr);
+    end
+    if (!gc && gc_prev) begin
+      $display("gc end cycle %0d free_addr %0d", cycle_count, free_addr);
+    end
+    if (gc_ready && !gc_ready_prev) begin
+      $display("gc_ready asserted cycle %0d mem_addr %0d", cycle_count, address1_mtu);
+    end
+    if (!gc_ready && gc_ready_prev) begin
+      $display("gc_ready deasserted cycle %0d", cycle_count);
+    end
+    gc_prev <= gc;
+    gc_ready_prev <= gc_ready;
+  end
+end
+`endif
+
+`ifdef TRACE_PROGRESS
+reg [2:0] select_prev;
+
+always @(posedge clk) begin
+  if (!reset) begin
+    select_prev <= 0;
+  end else if (select != select_prev) begin
+    $display("time %0t select %0d", $time, select);
+    select_prev <= select;
+  end
+end
+`endif
+
+`ifdef TRACE_ADDR19
+always @(posedge clk) begin
+  if (mem_execute && mem_func == `SET_CONTENTS && address1 == 11'd19) begin
+    $display("addr19 write sel %0d data %h", select, write_data);
+  end
+end
+`endif
+
+`ifdef TRACE_ADDR137
+always @(posedge clk) begin
+  if (mem_execute && mem_func == `SET_CONTENTS && address1 == 11'd137) begin
+    $display("addr137 write sel %0d data %h", select, write_data);
+  end
+end
+`endif
+
+`ifdef TRACE_ADDR130
+always @(posedge clk) begin
+  if (mem_execute && mem_func == `SET_CONTENTS && address1 == 11'd130) begin
+    $display("addr130 write sel %0d data %h", select, write_data);
+  end
+end
+`endif
+
+`ifdef TRACE_ADDR41
+always @(posedge clk) begin
+  if (mem_execute && mem_func == `SET_CONTENTS && address1 == 11'd65) begin
+    $display("addr41 write sel %0d data %h", select, write_data);
+  end
+end
+`endif
+
+`ifdef TRACE_SELF_REF
+always @(posedge clk) begin
+  if (mem_execute && mem_func == `SET_CONTENTS) begin
+    if ((write_data[`hed_tag] == `CELL && write_data[`hed_start:`hed_end] == address1)
+        || (write_data[`tel_tag] == `CELL && write_data[`tel_start:`tel_end] == address1)) begin
+      $display("self ref write addr %0d sel %0d data %h", address1, select, write_data);
+    end
+  end
+end
+`endif
+
 integer idx;
+reg [8*256-1:0] mem_init_file;
+reg [8*256-1:0] dump_mem_file;
+integer max_cycles;
 
 // Perform Test
 initial begin
-  if (MEM_INIT_FILE != "") begin
-    $readmemh(MEM_INIT_FILE, mem.ram.ram, 0, 2047);
+  mem_init_file = MEM_INIT_FILE;
+  dump_mem_file = DUMP_MEM_FILE;
+  max_cycles = MAX_CYCLES;
+  if ($value$plusargs("mem=%s", mem_init_file)) begin
+  end
+  if ($value$plusargs("dump=%s", dump_mem_file)) begin
+  end
+  if ($value$plusargs("max_cycles=%d", max_cycles)) begin
+  end
+  print_cycles = 1'b0;
+  if ($test$plusargs("print_cycles")) begin
+    print_cycles = 1'b1;
+  end
+  stop_on_finish = 1'b0;
+  if ($test$plusargs("stop_on_finish")) begin
+    stop_on_finish = 1'b1;
+  end
+
+  if (mem_init_file != "") begin
+    $readmemh(mem_init_file, mem.ram.ram, 0, 2047);
   end
 `ifndef NO_VCD
   $dumpfile("waveform.vcd");
@@ -424,25 +541,35 @@ initial begin
 
   traversal_execute = 1;
 
-  if (MAX_CYCLES != 0) begin
-    for (idx = 0; idx < MAX_CYCLES && traversal_finished != 1'b1; idx = idx + 1) begin
+  if (max_cycles != 0) begin
+    for (idx = 0; idx < max_cycles && traversal_finished != 1'b1; idx = idx + 1) begin
       @(posedge clk);
     end
     if (traversal_finished != 1'b1) begin
-      $display("timeout: traversal_finished not asserted after %0d cycles", MAX_CYCLES);
+      $display("timeout: traversal_finished not asserted after %0d cycles", max_cycles);
+      if (dump_mem_file != "") begin
+        $writememh(dump_mem_file, mem.ram.ram, 0, 2047);
+      end
       $finish;
     end
   end else begin
     wait (traversal_finished == 1'b1);
   end
+  if (stop_on_finish) begin
+    traversal_execute = 0;
+  end
+  finish_cycle = cycle_count;
   repeat (500) @(posedge clk);
 
+  if (print_cycles) begin
+    $display("cycles %0d", finish_cycle);
+  end
   $display("ram[1] %x", mem.ram.ram[1]);
   $display("ram[1025] %x", mem.ram.ram[1025]);
   $display("error %x", error);
   $display("edit_error %x", edit_error);
-  if (DUMP_MEM_FILE != "") begin
-    $writememh(DUMP_MEM_FILE, mem.ram.ram, 0, 2047);
+  if (dump_mem_file != "") begin
+    $writememh(dump_mem_file, mem.ram.ram, 0, 2047);
   end
 
   $finish;

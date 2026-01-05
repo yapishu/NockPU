@@ -206,10 +206,15 @@ module incr_block (
         end
 
         LA_ALLOC: begin
-          mem_func <= `GET_FREE;
-          write_data <= la_new_len;
-          mem_execute <= 1;
-          state <= LA_ALLOC_WAIT;
+          if (mem_ready) begin
+            mem_func <= `GET_FREE;
+            write_data <= la_new_len;
+            mem_execute <= 1;
+            state <= LA_ALLOC_WAIT;
+          end else begin
+            mem_func <= 0;
+            mem_execute <= 0;
+          end
         end
 
         LA_ALLOC_WAIT: begin
