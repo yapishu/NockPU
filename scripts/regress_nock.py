@@ -137,17 +137,15 @@ def axis_slot(axis, subject):
         raise ValueError("axis must be positive")
     if axis == 1:
         return subject
+    path = []
+    while axis > 1:
+        path.append(axis & 1)
+        axis //= 2
     cur = subject
-    cur_axis = axis
-    while cur_axis > 1:
+    for direction in reversed(path):
         if not is_cell(cur):
             raise ValueError("axis over atom")
-        if cur_axis & 1:
-            cur = cur.tail
-            cur_axis = (cur_axis - 1) // 2
-        else:
-            cur = cur.head
-            cur_axis //= 2
+        cur = cur.tail if direction else cur.head
     return cur
 
 
@@ -158,11 +156,22 @@ def edit_axis(axis, value, subject):
         raise ValueError("axis must be positive")
     if axis == 1:
         return value
-    if not is_cell(subject):
-        raise ValueError("edit axis over atom")
-    if axis & 1:
-        return Cell(subject.head, edit_axis((axis - 1) // 2, value, subject.tail))
-    return Cell(edit_axis(axis // 2, value, subject.head), subject.tail)
+    path = []
+    while axis > 1:
+        path.append(axis & 1)
+        axis //= 2
+
+    def walk(cur, idx):
+        if idx < 0:
+            return value
+        if not is_cell(cur):
+            raise ValueError("edit axis over atom")
+        direction = path[idx]
+        if direction:
+            return Cell(cur.head, walk(cur.tail, idx - 1))
+        return Cell(walk(cur.head, idx - 1), cur.tail)
+
+    return walk(subject, len(path) - 1)
 
 
 def args_from(noun, count):
@@ -260,6 +269,8 @@ DEFAULT_TESTS = [
     "memory/atom_incr.hex",
     "memory/nested_increment.hex",
     "memory/add_equal.hex",
+    "memory/autocons.hex",
+    "memory/autocons2.hex",
     "memory/cell_tb.hex",
     "memory/cell_auto.hex",
     "memory/if.hex",
@@ -276,6 +287,7 @@ DEFAULT_TESTS = [
     "memory/opcode8_nested.hex",
     "memory/opcode8_2.hex",
     "memory/opcode9.hex",
+    "memory/opcode9_2.hex",
     "memory/opcode9_incr.hex",
     "memory/opcode9_9201.hex",
     "memory/opcode10.hex",
@@ -288,6 +300,8 @@ DEFAULT_TESTS = [
     "memory/add.hex",
     "memory/decrement.hex",
     "memory/cap.hex",
+    "memory/inc_3.hex",
+    "memory/ackerman_1_2.hex",
 ]
 SMOKE_ONLY = {
     "memory/add.hex",
@@ -317,23 +331,39 @@ def parse_error(output, label):
     return None
 
 
-def run_case(vvp_path, mem_path, dump_path, max_cycles):
+def parse_cycles(output):
+    for line in output.splitlines():
+        if line.startswith("cycles"):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    return int(parts[1])
+                except ValueError:
+                    return None
+    return None
+
+
+def run_case(vvp_path, mem_path, dump_path, max_cycles, print_cycles):
     cmd = ["vvp", vvp_path, f"+mem={mem_path}", f"+dump={dump_path}"]
     if max_cycles:
         cmd.append(f"+max_cycles={max_cycles}")
+    if print_cycles:
+        cmd.append("+print_cycles")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(result.stderr or "vvp failed")
     error = parse_error(result.stdout, "error")
     edit_error = parse_error(result.stdout, "edit_error")
+    cycles = parse_cycles(result.stdout)
     timed_out = "timeout: traversal_finished not asserted after" in result.stdout
-    return error, edit_error, timed_out, result.stdout
+    return error, edit_error, timed_out, cycles, result.stdout
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run NockPU regression tests.")
     parser.add_argument("--tests", nargs="*", default=DEFAULT_TESTS)
     parser.add_argument("--max-cycles", type=int, default=0)
+    parser.add_argument("--print-cycles", action="store_true")
     args = parser.parse_args()
 
     sys.setrecursionlimit(10000)
@@ -349,7 +379,13 @@ def main():
                 failures += 1
                 continue
             try:
-                error, edit_error, timed_out, _ = run_case(vvp_path, mem_path, dump_path, args.max_cycles)
+                error, edit_error, timed_out, cycles, _ = run_case(
+                    vvp_path,
+                    mem_path,
+                    dump_path,
+                    args.max_cycles,
+                    args.print_cycles,
+                )
             except Exception as exc:
                 print(f"{mem_path}: sim failed ({exc})")
                 failures += 1
@@ -363,8 +399,11 @@ def main():
                 failures += 1
                 continue
 
+            cycle_note = ""
+            if args.print_cycles and cycles is not None:
+                cycle_note = f", cycles {cycles}"
             if mem_path in SMOKE_ONLY:
-                print(f"{mem_path}: ok (smoke)")
+                print(f"{mem_path}: ok (smoke{cycle_note})")
                 continue
 
             try:
@@ -386,7 +425,10 @@ def main():
                 print(f"got      {pretty(got)}")
                 failures += 1
             else:
-                print(f"{mem_path}: ok")
+                if cycle_note:
+                    print(f"{mem_path}: ok ({cycle_note[2:]})")
+                else:
+                    print(f"{mem_path}: ok")
 
         if failures:
             print(f"{failures} failures")
