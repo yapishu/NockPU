@@ -10,7 +10,6 @@ module execute (
   output reg [7:0] error,
   input [2:0] execute_start,  // wire to begin execution (mux_conroller from traversal)
   input [`memory_addr_width - 1:0] execute_address,
-  input [`tag_width - 1:0] execute_tag,
   input [`memory_data_width - 1:0] execute_data,
   output reg [3:0] execute_return_sys_func,
   output reg [3:0] execute_return_state,
@@ -309,14 +308,14 @@ module execute (
               is_finished_reg <=0;
               error <= 0;
               if (execute_start == `MUX_EXECUTE) begin
-                if (execute_tag[0] == `ATOM) begin
+                if (execute_data[`tel_tag] == `ATOM) begin
                   debug_sig <= 16;
                   error <= `ERROR_TEL_NOT_CELL;
                   state <= EXE_ERROR_INIT;
                   exec_func <= EXE_FUNC_ERROR;
                 end else begin
                   if (mem_ready) begin
-                    mem_tag <= execute_tag;
+                    mem_tag <= execute_data[`tag_start:`tag_end];
 
                     execute_address_reg <= execute_address;
                     trav_P <= execute_address;
@@ -389,10 +388,17 @@ module execute (
               if (mem_ready) begin
                 // if data is [cell NIL] error
                 if(read_data1[`tel_start:`tel_end] ==`NIL && read_data1[`tel_tag] == `ATOM) begin
-                  debug_sig <= 18;
-                  error <= `ERROR_TEL_NOT_CELL;
-                  exec_func <= EXE_FUNC_ERROR;
-                  state <= EXE_ERROR_INIT;
+                  if (read_data1[`hed_tag] == `CELL) begin
+                    address1 <= read_data1[`hed_start:`hed_end];
+                    mem_func <= `GET_CONTENTS;
+                    mem_execute <= 1;
+                    state <= EXE_INIT_WRIT_TEL;
+                  end else begin
+                    debug_sig <= 18;
+                    error <= `ERROR_TEL_NOT_CELL;
+                    exec_func <= EXE_FUNC_ERROR;
+                    state <= EXE_ERROR_INIT;
+                  end
                 end else begin
                   mem_data <= read_data1;
                   mem_tag <= read_data1[`tag_start:`tag_end]; 
@@ -416,6 +422,8 @@ module execute (
                   exec_func <= EXE_FUNC_ERROR;
                   state <= EXE_ERROR_INIT;
                 end else begin
+                  func_return_exec_func <= EXE_FUNC_INIT;
+                  func_return_state <= EXE_INIT_FINISHED;
                   case (opcode)
                     `slot: begin
                       if (mem_tag[1] == `ATOM) begin  // if b is an atom
@@ -1529,7 +1537,9 @@ module execute (
                 write_data <= { 6'b100000,
                                 `CELL,
                                 `CELL,
+                                `ADDR_PAD,
                                 c_addr,
+                                `ADDR_PAD,
                                 b_addr};
                 mem_func <= `SET_CONTENTS;
                 mem_execute <= 1;
@@ -2567,6 +2577,7 @@ module execute (
           is_finished_reg <= 1;
         end
       endcase
+
     end
   end
 endmodule

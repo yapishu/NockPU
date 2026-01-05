@@ -52,6 +52,14 @@ module mem_traversal(
   reg stack_exec_pending;
   wire [`memory_addr_width:0] stack_top_idx;
   assign stack_top_idx = stack_ptr - 1'b1;
+  reg [`memory_addr_width - 1:0] atom_stack [0:STACK_DEPTH - 1];
+  reg [`memory_addr_width:0] atom_stack_ptr;
+  wire [`memory_addr_width:0] atom_stack_top_idx;
+  assign atom_stack_top_idx = atom_stack_ptr - 1'b1;
+  reg [`memory_addr_width - 1:0] cell_stack [0:STACK_DEPTH - 1];
+  reg [`memory_addr_width:0] cell_stack_ptr;
+  wire [`memory_addr_width:0] cell_stack_top_idx;
+  assign cell_stack_top_idx = cell_stack_ptr - 1'b1;
 
   // General Purpose Regsiters
   reg [`memory_addr_width - 1:0] address_gp;
@@ -119,6 +127,8 @@ module mem_traversal(
       mem_ready_prev <= 0;
       stack_ptr <= 0;
       stack_exec_pending <= 0;
+      atom_stack_ptr <= 0;
+      cell_stack_ptr <= 0;
     end
     else if (execute) begin
       mem_ready_prev <= mem_ready;
@@ -227,7 +237,11 @@ module mem_traversal(
           case(state)
             SYS_READ_INIT: begin
               debug_sig <= 1;
-              if (stack_ptr != 0 && mem_addr == stack_addr[stack_top_idx]) begin
+              if (gc) begin
+                state <= SYS_READ_GC_WAIT;
+                gc_ready <= 1;
+              end
+              else if (stack_ptr != 0 && mem_addr == stack_addr[stack_top_idx]) begin
                 is_finished_reg <= 0;
                 stack_exec_pending <= 1;
                 sys_func <= SYS_FUNC_EXECUTE;
@@ -265,6 +279,9 @@ module mem_traversal(
                 debug_sig <= 10;
                 mem_addr <= read_data1;
                 trav_P <= read_data1;
+                trav_B <= `NIL;
+                stack_ptr <= 0;
+                stack_exec_pending <= 0;
                 gc_ready <= 0;
                 is_finished_reg <= 0;
                 address1 <= read_data1;
@@ -399,69 +416,91 @@ module mem_traversal(
                   
                   `ATOM_CELL: begin
                     if(mem_tag[2] == 1'b0) begin // if both were visited
-                      // Set the command after write to traverse the tel
-                      write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                      write_return_state <= SYS_TRAVERSE_PUSH;
-                      //set tag to visited tel
-                      mem_tag[2] <= 1;
-                      //Store pointer to previous value in B
-                      trav_P <= tel;
-                      tel <= trav_B;
-                      trav_B <= mem_addr;
-                      //Write Data
-                      sys_func <= SYS_FUNC_WRITE;
-                      state <= SYS_WRITE_INIT;
+                      if (atom_stack_ptr == STACK_DEPTH) begin
+                        state <= SYS_EXECUTE_ERROR;
+                      end else begin
+                        atom_stack[atom_stack_ptr] <= tel;
+                        atom_stack_ptr <= atom_stack_ptr + 1'b1;
+                        // Set the command after write to traverse the tel
+                        write_return_sys_func <= SYS_FUNC_TRAVERSE;
+                        write_return_state <= SYS_TRAVERSE_PUSH;
+                        //set tag to visited tel
+                        mem_tag[2] <= 1;
+                        //Store pointer to previous value in B
+                        trav_P <= tel;
+                        tel <= trav_B;
+                        trav_B <= mem_addr;
+                        //Write Data
+                        sys_func <= SYS_FUNC_WRITE;
+                        state <= SYS_WRITE_INIT;
+                      end
                     end
                     else begin
-                      // Set the command after write to pop
-                      if(mem_tag[7] == 1'b1 && gc == 0) begin // If we still need to execute
-                        write_return_sys_func <= SYS_FUNC_EXECUTE;
-                        write_return_state <= SYS_EXECUTE_INIT;
+                      if (atom_stack_ptr == 0) begin
+                        state <= SYS_EXECUTE_ERROR;
                       end else begin
-                        write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                        write_return_state <= SYS_TRAVERSE_POP;
+                        // Set the command after write to pop
+                        if(mem_tag[7] == 1'b1 && gc == 0) begin // If we still need to execute
+                          write_return_sys_func <= SYS_FUNC_EXECUTE;
+                          write_return_state <= SYS_EXECUTE_INIT;
+                        end else begin
+                          write_return_sys_func <= SYS_FUNC_TRAVERSE;
+                          write_return_state <= SYS_TRAVERSE_POP;
+                        end
+                        mem_tag[3:2] <= 2'b00;
+                        trav_B <= tel;
+                        trav_P <= trav_B;
+                        tel <= atom_stack[atom_stack_top_idx];
+                        atom_stack_ptr <= atom_stack_ptr - 1'b1;
+                        //Write Data
+                        sys_func <= SYS_FUNC_WRITE;
+                        state <= SYS_WRITE_INIT;
                       end
-                      mem_tag[3:2] <= 2'b00;
-                      trav_B <= tel;
-                      trav_P <= trav_B;
-                      tel <= trav_P;
-                      //Write Data
-                      sys_func <= SYS_FUNC_WRITE;
-                      state <= SYS_WRITE_INIT;
                     end
                   end
                   `CELL_ATOM: begin
                     // if the hed cell hasn't been visited we push into it
                     if(mem_tag[3] == 0) begin 
-                      // Set the command after write to traverse the hed
-                      write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                      write_return_state <= SYS_TRAVERSE_PUSH;
-                      //set tag to visited hed
-                      mem_tag[3] <= 1;
-                      //Store pointer to previous value in B
-                      trav_P <= hed;
-                      hed <= trav_B;
-                      trav_B <= mem_addr;
-                      //Write Data
-                      sys_func <= SYS_FUNC_WRITE;
-                      state <= SYS_WRITE_INIT;
+                      if (cell_stack_ptr == STACK_DEPTH) begin
+                        state <= SYS_EXECUTE_ERROR;
+                      end else begin
+                        cell_stack[cell_stack_ptr] <= hed;
+                        cell_stack_ptr <= cell_stack_ptr + 1'b1;
+                        // Set the command after write to traverse the hed
+                        write_return_sys_func <= SYS_FUNC_TRAVERSE;
+                        write_return_state <= SYS_TRAVERSE_PUSH;
+                        //set tag to visited hed
+                        mem_tag[3] <= 1;
+                        //Store pointer to previous value in B
+                        trav_P <= hed;
+                        hed <= trav_B;
+                        trav_B <= mem_addr;
+                        //Write Data
+                        sys_func <= SYS_FUNC_WRITE;
+                        state <= SYS_WRITE_INIT;
+                      end
                     end
                     else begin
-                      // Set the command after write to pop
-                      if(mem_tag[7] == 1 && gc == 0) begin // If we still need to execute
-                        write_return_sys_func <= SYS_FUNC_EXECUTE;
-                        write_return_state <= SYS_EXECUTE_INIT;
+                      if (cell_stack_ptr == 0) begin
+                        state <= SYS_EXECUTE_ERROR;
                       end else begin
-                        write_return_sys_func <= SYS_FUNC_TRAVERSE;
-                        write_return_state <= SYS_TRAVERSE_POP;
+                        // Set the command after write to pop
+                        if(mem_tag[7] == 1 && gc == 0) begin // If we still need to execute
+                          write_return_sys_func <= SYS_FUNC_EXECUTE;
+                          write_return_state <= SYS_EXECUTE_INIT;
+                        end else begin
+                          write_return_sys_func <= SYS_FUNC_TRAVERSE;
+                          write_return_state <= SYS_TRAVERSE_POP;
+                        end
+                        mem_tag[3:2] <= 2'b00;
+                        trav_B <= hed;
+                        trav_P <= trav_B;
+                        hed <= cell_stack[cell_stack_top_idx];
+                        cell_stack_ptr <= cell_stack_ptr - 1'b1;
+                        //Write Data
+                        sys_func <= SYS_FUNC_WRITE;
+                        state <= SYS_WRITE_INIT;
                       end
-                      mem_tag[3:2] <= 2'b00;
-                      trav_B <= hed;
-                      trav_P <= trav_B;
-                      hed <= trav_P;
-                      //Write Data
-                      sys_func <= SYS_FUNC_WRITE;
-                      state <= SYS_WRITE_INIT;
                     end
                   end
                 endcase

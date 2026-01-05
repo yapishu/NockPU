@@ -52,7 +52,6 @@ wire [`memory_data_width - 1:0] write_data_nem;
 
 //Signal from MTU to NEM
 wire [`memory_addr_width - 1:0] execute_address;
-wire [`tag_width - 1:0] execute_tag;
 wire [`memory_data_width - 1:0] execute_data;
 wire execute_finished;
 wire [7:0] error;
@@ -105,7 +104,6 @@ mem_traversal traversal(.power (power),
                         .error(error),
                         .mux_controller(select),
                         .execute_address(execute_address),
-                        .execute_tag(execute_tag),
                         .execute_data(execute_data),
                         .execute_finished(execute_finished),
                         .execute_return_sys_func(execute_return_sys_func),
@@ -117,7 +115,6 @@ execute execute(.clk(clk),
 				.error(error),
 				.execute_start(select),
 				.execute_address(execute_address),
-				.execute_tag(execute_tag),
 				.execute_data(execute_data),
                 .mem_ready(mem_ready),
 				.mem_execute(mem_execute_nem),
