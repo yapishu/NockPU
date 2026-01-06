@@ -23,6 +23,7 @@ wire [7:0] error;
 wire [7:0] edit_error;
 wire [`noun_width-1:0] hint;
 wire hint_tag;
+wire [`memory_addr_width - 1:0] free_ptr;
 
 nockpu_top dut(
   .clk (clk),
@@ -41,7 +42,8 @@ nockpu_top dut(
   .error (error),
   .edit_error (edit_error),
   .hint (hint),
-  .hint_tag (hint_tag)
+  .hint_tag (hint_tag),
+  .free_ptr (free_ptr)
 );
 
 initial begin
@@ -95,13 +97,15 @@ reg [`memory_data_width - 1:0] read_word;
 reg [8*256-1:0] mem_init_file;
 integer cycle_count;
 integer wait_cycles;
+localparam integer MEM_DEPTH = 1 << `memory_addr_width;
+localparam integer MEM_LAST = MEM_DEPTH - 1;
 
 initial begin
   mem_init_file = MEM_INIT_FILE;
   if ($value$plusargs("mem=%s", mem_init_file)) begin
   end
   if (mem_init_file != "") begin
-    $readmemh(mem_init_file, dut.mem.ram.ram, 0, 2047);
+    $readmemh(mem_init_file, dut.mem.ram.ram, 0, MEM_LAST);
   end
 
   start_addr = 1;

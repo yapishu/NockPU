@@ -6,7 +6,12 @@ module memory_unit_tb();
 
 //Test Parameters
 parameter MEM_INIT_FILE = "./memory/memory.hex";
-parameter MEM_WRITE_DATA = 68'hDEADBEEF;
+parameter MEM_WRITE_DATA = 64'hDEADBEEF;
+localparam integer MEM_DEPTH = 1 << `memory_addr_width;
+localparam integer MEM_LAST = MEM_DEPTH - 1;
+localparam [`memory_addr_width - 1:0] FREE_INIT_ADDR = `memory_addr_width'd1500;
+localparam [`memory_addr_width - 1:0] SPACE_BASE =
+  (1 << (`memory_addr_width - 1));
 
 //Signal Declarations
 reg MAX10_CLK1_50;
@@ -23,32 +28,41 @@ reg mem_execute;
 wire power;
 assign power = 1'b1;
 
-reg [`memory_addr_width - 1:0] addr;
-
+reg [`memory_addr_width - 1:0] addr1;
+reg [`memory_addr_width - 1:0] addr2;
 
 reg [`memory_data_width - 1:0] write_data;
 wire [`memory_addr_width - 1:0] free_addr;
-wire [`memory_data_width - 1:0] read_data;
-wire [`memory_data_width - 1:0] mem_data_out;
+wire [`memory_addr_width - 1:0] free_ptr;
+wire [`memory_data_width - 1:0] read_data1;
+wire [`memory_data_width - 1:0] read_data2;
+wire [`memory_data_width - 1:0] mem_data_out1;
+wire [`memory_data_width - 1:0] mem_data_out2;
+wire gc;
+reg gc_ready;
 
 reg [`memory_addr_width - 1:0] free_addr_reg;
 
 wire mem_ready;
-wire [3:0] state;
 
 
 // Instantiate Memory Unit
 memory_unit mem(.func (mem_func),
                 .execute (mem_execute),
-                .address (addr),
+                .address1 (addr1),
+                .address2 (addr2),
                 .write_data (write_data),
                 .free_addr (free_addr),
-                .read_data (read_data),
+                .free_ptr (free_ptr),
+                .read_data1 (read_data1),
+                .read_data2 (read_data2),
+                .gc (gc),
+                .gc_ready (gc_ready),
                 .is_ready (mem_ready),
                 .power (power),
                 .clk (clk),
-                .state (state),
-                .mem_data_out(mem_data_out),
+                .mem_data_out1 (mem_data_out1),
+                .mem_data_out2 (mem_data_out2),
                 .rst (reset));
 
 // Setup Clock
@@ -59,79 +73,76 @@ end
 
 integer idx;
 
+task mem_request;
+  input [1:0] func;
+  input [`memory_addr_width - 1:0] a1;
+  input [`memory_addr_width - 1:0] a2;
+  input [`memory_data_width - 1:0] wdata;
+  begin
+    mem_func = func;
+    addr1 = a1;
+    addr2 = a2;
+    write_data = wdata;
+    mem_execute = 1'b1;
+    @(posedge clk);
+    @(posedge clk);
+    mem_execute = 1'b0;
+    wait (mem_ready == 1'b0);
+    wait (mem_ready == 1'b1);
+  end
+endtask
+
 // Perform Test
 initial begin
   if (MEM_INIT_FILE != "") begin
-    $readmemh(MEM_INIT_FILE, mem.ram.ram);
+    $readmemh(MEM_INIT_FILE, mem.ram.ram, 0, MEM_LAST);
   end
-  $dumpfile("memory_unit_tb.vcd");
-  $dumpvars(0, memory_unit_tb);
-
-  for (idx = 0; idx < 1023; idx = idx+1) begin
-    $dumpvars(0,mem.ram.ram[idx]);
+  mem.ram.ram[0] = FREE_INIT_ADDR;
+  if ($test$plusargs("dump")) begin
+    $dumpfile("memory_unit_tb.vcd");
+    $dumpvars(0, memory_unit_tb);
   end
 
 
   mem_execute = 0;
+  gc_ready = 1'b1;
+  addr1 = 0;
+  addr2 = 0;
   // Reset
   reset = 1'b0;
   repeat (2) @(posedge clk);
   reset = 1'b1;
   wait (mem_ready == 1'b1);
+  if (free_addr !== FREE_INIT_ADDR) begin
+    $display("FAIL free init expected %0d got %0d", FREE_INIT_ADDR, free_addr);
+    $finish;
+  end
+  mem.old_root = SPACE_BASE;
+  mem.new_root = `memory_addr_width'd1;
 
 
   // Get Next Free Memory Location
-  mem_func = `GET_FREE;
-  write_data <= 1;
-  mem_execute = 1;
-  repeat (2) @(posedge clk);
-  mem_execute = 0;
+  mem_request(`GET_FREE, 0, 0, 1);
   free_addr_reg = free_addr;
-  wait (mem_ready == 1'b1);
-
-  repeat (1) @(posedge clk);
 
 
   // Write to Free Addr
-  write_data = MEM_WRITE_DATA;
-  addr = free_addr_reg;
-  mem_func = `SET_CONTENTS;
-  mem_execute = 1;
-  repeat (2) @(posedge clk);
-  mem_execute = 0;
-  wait (mem_ready == 1'b1);
-
-  repeat (1) @(posedge clk);
-
-  // Get Next Free Memory Location
-  mem_func = `GET_FREE;
-  write_data <= 4;
-  mem_execute = 1;
-  repeat (2) @(posedge clk);
-  mem_execute = 0;
-  free_addr_reg = free_addr;
-  wait (mem_ready == 1'b1);
-
-  repeat (1) @(posedge clk);
-
-  // Begin Read
-  mem_func = `GET_CONTENTS;
-
-  addr = 0;
-
-  while(addr < free_addr_reg +1) begin
-    mem_execute = 1;
-    repeat (2) @(posedge clk);
-
-    mem_execute = 0;
-
-    wait (mem_ready == 1'b1);
-
-    addr = addr +1;
-    repeat (2) @(posedge clk);
+  mem_request(`SET_CONTENTS, free_addr_reg, 0, MEM_WRITE_DATA);
+  mem_request(`GET_CONTENTS, free_addr_reg, 0, 0);
+  if (read_data1 !== MEM_WRITE_DATA) begin
+    $display("FAIL mem readback expected %h got %h", MEM_WRITE_DATA, read_data1);
+    $finish;
   end
 
-  $stop;
+  // Get Next Free Memory Location
+  mem_request(`GET_FREE, 0, 0, 4);
+  if (free_addr !== free_addr_reg + 1'b1) begin
+    $display("FAIL free addr expected %0d got %0d", free_addr_reg + 1'b1, free_addr);
+    $finish;
+  end
+  free_addr_reg = free_addr;
+  $display("PASS");
+  $finish;
 end
 
 endmodule

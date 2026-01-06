@@ -14,6 +14,7 @@ module incr_block (
   output reg [3:0] incr_return_sys_func,
   output reg [3:0] incr_return_state,
   input mem_ready,
+  input gc,
   input [`memory_data_width - 1:0] read_data1,
   input [`memory_data_width - 1:0] read_data2,
   input [`memory_addr_width - 1:0] free_addr,
@@ -229,6 +230,13 @@ module incr_block (
             end else begin
               state <= LA_PASS2_READ;
             end
+          end else if (gc) begin
+            mem_execute <= 0;
+            mem_func <= 0;
+            incr_return_sys_func <= `SYS_FUNC_READ;
+            incr_return_state <= `SYS_READ_INIT;
+            is_finished_reg <= 1'b1;
+            state <= PAUSE;
           end else begin
             mem_func <= 0;
             mem_execute <= 0;

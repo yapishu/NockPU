@@ -9,7 +9,8 @@ module ram(
   output reg [`memory_data_width - 1:0] q2
 );
 
-  reg [`memory_data_width - 1:0] ram [`memory_addr_width'h7FF:0];
+  localparam integer RAM_DEPTH = 1 << `memory_addr_width;
+  reg [`memory_data_width - 1:0] ram [0:RAM_DEPTH - 1];
 
   always @(posedge clock) begin
     if (wren) begin
@@ -23,4 +24,3 @@ module ram(
     end
   end
 endmodule
-

@@ -62,6 +62,7 @@ wire [`memory_addr_width - 1:0] address1;
 wire [`memory_addr_width - 1:0] address2;
 wire [`memory_data_width - 1:0] write_data;
 wire [`memory_addr_width - 1:0] free_addr;
+wire [`memory_addr_width - 1:0] free_ptr;
 wire [`memory_data_width - 1:0] read_data1;
 wire [`memory_data_width - 1:0] read_data2;
 wire [`memory_data_width - 1:0] mem_data_out1;
@@ -180,6 +181,7 @@ memory_unit mem(.func (mem_func),
                 .address2 (address2),
                 .write_data (write_data),
                 .free_addr (free_addr),
+                .free_ptr (free_ptr),
                 .read_data1 (read_data1),
                 .read_data2 (read_data2),
                 .is_ready (mem_ready),
@@ -339,6 +341,7 @@ incr_block incr_block(.clk(clk),
                       .incr_address(incr_address),
                       .incr_data(incr_data),
                       .mem_ready(mem_ready),
+                      .gc(gc),
                       .mem_execute(mem_execute_incr),
                       .mem_func(mem_func_incr),
                       .address1(address1_incr),
@@ -496,6 +499,9 @@ end
 `endif
 
 integer idx;
+localparam integer MEM_DEPTH = 1 << `memory_addr_width;
+localparam integer MEM_LAST = MEM_DEPTH - 1;
+localparam integer SPACE_BASE = 1 << (`memory_addr_width - 1);
 reg [8*256-1:0] mem_init_file;
 reg [8*256-1:0] dump_mem_file;
 integer max_cycles;
@@ -521,13 +527,13 @@ initial begin
   end
 
   if (mem_init_file != "") begin
-    $readmemh(mem_init_file, mem.ram.ram, 0, 2047);
+    $readmemh(mem_init_file, mem.ram.ram, 0, MEM_LAST);
   end
 `ifndef NO_VCD
   $dumpfile("waveform.vcd");
   $dumpvars(0, execute_tb);
 
-  for (idx = 0; idx < 2047; idx = idx+1) begin
+  for (idx = 0; idx < MEM_DEPTH; idx = idx+1) begin
     $dumpvars(0,mem.ram.ram[idx]);
   end
 `endif
@@ -547,8 +553,17 @@ initial begin
     end
     if (traversal_finished != 1'b1) begin
       $display("timeout: traversal_finished not asserted after %0d cycles", max_cycles);
+      $display("debug: sel %0d trav_state %0d exec_func %0d exec_state %0d mem_state %0d mem_ready %0d mem_execute %0d mem_func %0d",
+               select,
+               traversal.state,
+               execute.exec_func,
+               execute.state,
+               mem.state,
+               mem_ready,
+               mem_execute,
+               mem_func);
       if (dump_mem_file != "") begin
-        $writememh(dump_mem_file, mem.ram.ram, 0, 2047);
+        $writememh(dump_mem_file, mem.ram.ram, 0, MEM_LAST);
       end
       $finish;
     end
@@ -565,11 +580,11 @@ initial begin
     $display("cycles %0d", finish_cycle);
   end
   $display("ram[1] %x", mem.ram.ram[1]);
-  $display("ram[1025] %x", mem.ram.ram[1025]);
+  $display("ram[%0d] %x", SPACE_BASE + 1, mem.ram.ram[SPACE_BASE + 1]);
   $display("error %x", error);
   $display("edit_error %x", edit_error);
   if (dump_mem_file != "") begin
-    $writememh(dump_mem_file, mem.ram.ram, 0, 2047);
+    $writememh(dump_mem_file, mem.ram.ram, 0, MEM_LAST);
   end
 
   $finish;

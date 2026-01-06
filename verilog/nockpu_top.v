@@ -2,7 +2,18 @@
 `include "memory_mux.vh"
 `include "execute.vh"
 
-module nockpu_top(
+module nockpu_top #(
+`ifdef NPU_STACK_DEPTH_TRAV
+  parameter integer STACK_DEPTH_TRAV = `NPU_STACK_DEPTH_TRAV,
+`else
+  parameter integer STACK_DEPTH_TRAV = 2048,
+`endif
+`ifdef NPU_STACK_DEPTH_EQUAL
+  parameter integer STACK_DEPTH_EQUAL = `NPU_STACK_DEPTH_EQUAL
+`else
+  parameter integer STACK_DEPTH_EQUAL = 2048
+`endif
+)(
   input clk,
   input rst,
   input start,
@@ -19,7 +30,8 @@ module nockpu_top(
   output [7:0] error,
   output [7:0] edit_error,
   output [`noun_width-1:0] hint,
-  output hint_tag
+  output hint_tag,
+  output [`memory_addr_width - 1:0] free_ptr
 );
   wire power = 1'b1;
 
@@ -141,6 +153,7 @@ module nockpu_top(
     .address2 (address2),
     .write_data (write_data),
     .free_addr (free_addr),
+    .free_ptr (free_ptr),
     .read_data1 (read_data1),
     .read_data2 (read_data2),
     .is_ready (mem_ready),
@@ -308,7 +321,9 @@ module nockpu_top(
   // Traversal.
   wire traversal_finished;
 
-  mem_traversal traversal(
+  mem_traversal #(
+    .STACK_DEPTH (STACK_DEPTH_TRAV)
+  ) traversal(
     .power (power),
     .clk (clk),
     .rst (rst),
@@ -391,6 +406,7 @@ module nockpu_top(
     .incr_address (incr_address),
     .incr_data (incr_data),
     .mem_ready (mem_ready),
+    .gc (gc),
     .mem_execute (mem_execute_incr),
     .mem_func (mem_func_incr),
     .address1 (address1_incr),
@@ -405,7 +421,9 @@ module nockpu_top(
   );
 
   // Equality module.
-  equal_block equal_block(
+  equal_block #(
+    .STACK_DEPTH (STACK_DEPTH_EQUAL)
+  ) equal_block(
     .clk (clk),
     .rst (rst),
     .equal_error (equal_error),

@@ -1,5 +1,15 @@
 module nockpu_u55c #(
-  parameter integer AXI_ADDR_WIDTH = 12
+  parameter integer AXI_ADDR_WIDTH = 12,
+`ifdef NPU_STACK_DEPTH_TRAV
+  parameter integer STACK_DEPTH_TRAV = `NPU_STACK_DEPTH_TRAV,
+`else
+  parameter integer STACK_DEPTH_TRAV = 2048,
+`endif
+`ifdef NPU_STACK_DEPTH_EQUAL
+  parameter integer STACK_DEPTH_EQUAL = `NPU_STACK_DEPTH_EQUAL
+`else
+  parameter integer STACK_DEPTH_EQUAL = 2048
+`endif
 )(
   input ap_clk,
   input ap_rst_n,
@@ -31,7 +41,9 @@ module nockpu_u55c #(
   wire core_done;
 
   nockpu_axi_lite #(
-    .AXI_ADDR_WIDTH (AXI_ADDR_WIDTH)
+    .AXI_ADDR_WIDTH (AXI_ADDR_WIDTH),
+    .STACK_DEPTH_TRAV (STACK_DEPTH_TRAV),
+    .STACK_DEPTH_EQUAL (STACK_DEPTH_EQUAL)
   ) core (
     .clk (ap_clk),
     .rst (ap_rst_n),

@@ -2,7 +2,9 @@
 `define memory_include
 
 `define memory_data_width 64
+`ifndef memory_addr_width
 `define memory_addr_width 11
+`endif
 `define noun_width        28
 `define noun_tag_width    1
 `define execute_bit       63
@@ -38,7 +40,7 @@
 
 //Memory constants
 `define NIL          28'hFFFFFFF
-`define NIL_ADDR     `memory_addr_width'h7FF
-`define ADDR_PAD     17'h0
+`define NIL_ADDR     {`memory_addr_width{1'b1}}
+`define ADDR_PAD     {(`noun_width-`memory_addr_width){1'b0}}
 
 `endif

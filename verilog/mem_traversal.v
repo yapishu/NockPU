@@ -1,9 +1,12 @@
 `include "memory_unit.vh"
+`include "memory_mux.vh"
 `include "mem_traversal.vh"
 `include "execute.vh"
 
 
-module mem_traversal(
+module mem_traversal #(
+  parameter integer STACK_DEPTH = 2048
+)(
   input power, clk, rst,
   input [`memory_addr_width - 1:0] start_addr,
   input execute,
@@ -31,7 +34,6 @@ module mem_traversal(
   reg is_finished_reg;
   assign finished = is_finished_reg;
 
-  localparam integer STACK_DEPTH = 2048;
   reg [`memory_addr_width - 1:0] trav_stack_addr [0:STACK_DEPTH - 1];
   reg [1:0] trav_stack_state [0:STACK_DEPTH - 1];
   reg [`memory_addr_width:0] trav_stack_ptr;
@@ -123,17 +125,22 @@ module mem_traversal(
             gc_ready <= 1'b1;
             state <= STATE_GC_WAIT;
           end else if (trav_stack_ptr == 0) begin
-            trav_stack_addr[0] <= start_addr;
-            trav_stack_state[0] <= TRAV_ENTER;
-            trav_stack_ptr <= 1;
-            in_stack <= {MEM_DEPTH{1'b0}};
-            in_stack[start_addr] <= 1'b1;
-            mem_addr <= start_addr;
-            address1 <= start_addr;
-            address2 <= 0;
-            mem_func <= `GET_CONTENTS;
-            mem_execute <= 1'b1;
-            state <= STATE_WAIT;
+            if (mem_ready) begin
+              trav_stack_addr[0] <= start_addr;
+              trav_stack_state[0] <= TRAV_ENTER;
+              trav_stack_ptr <= 1;
+              in_stack <= {MEM_DEPTH{1'b0}};
+              in_stack[start_addr] <= 1'b1;
+              mem_addr <= start_addr;
+              address1 <= start_addr;
+              address2 <= 0;
+              mem_func <= `GET_CONTENTS;
+              mem_execute <= 1'b1;
+              state <= STATE_WAIT;
+            end else begin
+              mem_execute <= 1'b0;
+              mem_func <= 0;
+            end
           end
         end
 
@@ -142,16 +149,26 @@ module mem_traversal(
             is_finished_reg <= 1'b0;
             address1 <= start_addr;
             address2 <= 0;
-            mem_func <= `GET_CONTENTS;
-            mem_execute <= 1'b1;
-            state <= STATE_FINISH_WAIT;
+            if (mem_ready) begin
+              mem_func <= `GET_CONTENTS;
+              mem_execute <= 1'b1;
+              state <= STATE_FINISH_WAIT;
+            end else begin
+              mem_execute <= 1'b0;
+              mem_func <= 0;
+            end
           end else begin
             mem_addr <= trav_stack_addr[trav_stack_top_idx];
             address1 <= trav_stack_addr[trav_stack_top_idx];
             address2 <= 0;
-            mem_func <= `GET_CONTENTS;
-            mem_execute <= 1'b1;
-            state <= STATE_WAIT;
+            if (mem_ready) begin
+              mem_func <= `GET_CONTENTS;
+              mem_execute <= 1'b1;
+              state <= STATE_WAIT;
+            end else begin
+              mem_execute <= 1'b0;
+              mem_func <= 0;
+            end
           end
         end
 
@@ -184,17 +201,27 @@ module mem_traversal(
             is_finished_reg <= 1'b0;
             address1 <= start_addr;
             address2 <= 0;
-            mem_func <= `GET_CONTENTS;
-            mem_execute <= 1'b1;
-            state <= STATE_FINISH_WAIT;
+            if (mem_ready) begin
+              mem_func <= `GET_CONTENTS;
+              mem_execute <= 1'b1;
+              state <= STATE_FINISH_WAIT;
+            end else begin
+              mem_execute <= 1'b0;
+              mem_func <= 0;
+            end
           end else if (is_large_atom) begin
             if (trav_stack_ptr == 1) begin
               is_finished_reg <= 1'b0;
               address1 <= start_addr;
               address2 <= 0;
-              mem_func <= `GET_CONTENTS;
-              mem_execute <= 1'b1;
-              state <= STATE_FINISH_WAIT;
+              if (mem_ready) begin
+                mem_func <= `GET_CONTENTS;
+                mem_execute <= 1'b1;
+                state <= STATE_FINISH_WAIT;
+              end else begin
+                mem_execute <= 1'b0;
+                mem_func <= 0;
+              end
             end else begin
               trav_stack_ptr <= trav_stack_ptr - 1'b1;
               in_stack[trav_stack_addr[trav_stack_top_idx]] <= 1'b0;
@@ -314,9 +341,14 @@ module mem_traversal(
                     is_finished_reg <= 1'b0;
                     address1 <= start_addr;
                     address2 <= 0;
-                    mem_func <= `GET_CONTENTS;
-                    mem_execute <= 1'b1;
-                    state <= STATE_FINISH_WAIT;
+                    if (mem_ready) begin
+                      mem_func <= `GET_CONTENTS;
+                      mem_execute <= 1'b1;
+                      state <= STATE_FINISH_WAIT;
+                    end else begin
+                      mem_execute <= 1'b0;
+                      mem_func <= 0;
+                    end
                   end else begin
                     trav_stack_ptr <= trav_stack_ptr - 1'b1;
                     in_stack[trav_stack_addr[trav_stack_top_idx]] <= 1'b0;
@@ -357,9 +389,14 @@ module mem_traversal(
                     is_finished_reg <= 1'b0;
                     address1 <= start_addr;
                     address2 <= 0;
-                    mem_func <= `GET_CONTENTS;
-                    mem_execute <= 1'b1;
-                    state <= STATE_FINISH_WAIT;
+                    if (mem_ready) begin
+                      mem_func <= `GET_CONTENTS;
+                      mem_execute <= 1'b1;
+                      state <= STATE_FINISH_WAIT;
+                    end else begin
+                      mem_execute <= 1'b0;
+                      mem_func <= 0;
+                    end
                   end else begin
                     trav_stack_ptr <= trav_stack_ptr - 1'b1;
                     in_stack[trav_stack_addr[trav_stack_top_idx]] <= 1'b0;
@@ -417,9 +454,14 @@ module mem_traversal(
                     is_finished_reg <= 1'b0;
                     address1 <= start_addr;
                     address2 <= 0;
-                    mem_func <= `GET_CONTENTS;
-                    mem_execute <= 1'b1;
-                    state <= STATE_FINISH_WAIT;
+                    if (mem_ready) begin
+                      mem_func <= `GET_CONTENTS;
+                      mem_execute <= 1'b1;
+                      state <= STATE_FINISH_WAIT;
+                    end else begin
+                      mem_execute <= 1'b0;
+                      mem_func <= 0;
+                    end
                   end else begin
                     trav_stack_ptr <= trav_stack_ptr - 1'b1;
                     in_stack[trav_stack_addr[trav_stack_top_idx]] <= 1'b0;
@@ -453,9 +495,14 @@ module mem_traversal(
               is_finished_reg <= 1'b0;
               address1 <= start_addr;
               address2 <= 0;
-              mem_func <= `GET_CONTENTS;
-              mem_execute <= 1'b1;
-              state <= STATE_FINISH_WAIT;
+              if (mem_ready) begin
+                mem_func <= `GET_CONTENTS;
+                mem_execute <= 1'b1;
+                state <= STATE_FINISH_WAIT;
+              end else begin
+                mem_execute <= 1'b0;
+                mem_func <= 0;
+              end
             end else begin
               mux_controller <= `MUX_TRAVERSAL;
               exec_pop_pending <= 1'b0;
@@ -469,27 +516,32 @@ module mem_traversal(
 
         STATE_GC_WAIT: begin
           if (!gc && gc_ready) begin
-            gc_ready <= 1'b0;
-            trav_stack_ptr <= 0;
-            if (read_data1[`memory_addr_width - 1:0] != `NIL_ADDR) begin
-              trav_stack_addr[0] <= read_data1[`memory_addr_width - 1:0];
-              trav_stack_state[0] <= TRAV_ENTER;
-              trav_stack_ptr <= 1;
-              in_stack <= {MEM_DEPTH{1'b0}};
-              in_stack[read_data1[`memory_addr_width - 1:0]] <= 1'b1;
-              mem_addr <= read_data1[`memory_addr_width - 1:0];
-              address1 <= read_data1[`memory_addr_width - 1:0];
-              address2 <= 0;
-              mem_func <= `GET_CONTENTS;
-              mem_execute <= 1'b1;
-              state <= STATE_WAIT;
+            if (mem_ready) begin
+              gc_ready <= 1'b0;
+              trav_stack_ptr <= 0;
+              if (read_data1[`memory_addr_width - 1:0] != `NIL_ADDR) begin
+                trav_stack_addr[0] <= read_data1[`memory_addr_width - 1:0];
+                trav_stack_state[0] <= TRAV_ENTER;
+                trav_stack_ptr <= 1;
+                in_stack <= {MEM_DEPTH{1'b0}};
+                in_stack[read_data1[`memory_addr_width - 1:0]] <= 1'b1;
+                mem_addr <= read_data1[`memory_addr_width - 1:0];
+                address1 <= read_data1[`memory_addr_width - 1:0];
+                address2 <= 0;
+                mem_func <= `GET_CONTENTS;
+                mem_execute <= 1'b1;
+                state <= STATE_WAIT;
+              end else begin
+                is_finished_reg <= 1'b0;
+                address1 <= start_addr;
+                address2 <= 0;
+                mem_func <= `GET_CONTENTS;
+                mem_execute <= 1'b1;
+                state <= STATE_FINISH_WAIT;
+              end
             end else begin
-              is_finished_reg <= 1'b0;
-              address1 <= start_addr;
-              address2 <= 0;
-              mem_func <= `GET_CONTENTS;
-              mem_execute <= 1'b1;
-              state <= STATE_FINISH_WAIT;
+              mem_execute <= 1'b0;
+              mem_func <= 0;
             end
           end
         end

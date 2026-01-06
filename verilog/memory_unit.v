@@ -21,6 +21,7 @@ module memory_unit(
   input [`memory_data_width - 1:0] write_data,
   input gc_ready,
   output reg [`memory_addr_width - 1:0] free_addr,
+  output wire [`memory_addr_width - 1:0] free_ptr,
   output reg [`memory_data_width - 1:0] read_data1,
   output reg [`memory_data_width - 1:0] read_data2,
   output reg gc,
@@ -54,7 +55,8 @@ module memory_unit(
   reg [`memory_data_width - 1:0] gc_d;
   reg [`memory_data_width - 1:0] gc_tmp;
   
-  localparam [`memory_addr_width:0] memory_mask = (1<<`memory_addr_width-1)+1; 
+  localparam [`memory_addr_width - 1:0] memory_mask =
+    {1'b1, {(`memory_addr_width - 1){1'b0}}}; 
 
   reg [`memory_addr_width - 1:0] max_memory;
   reg [`memory_addr_width - 1:0] need_mem;
@@ -62,6 +64,9 @@ module memory_unit(
 
   // Internal regs and wires
   reg [`memory_addr_width - 1:0] free_mem;
+  wire [`memory_addr_width - 1:0] free_mem_next;
+  assign free_mem_next = free_mem + write_data[`memory_addr_width - 1:0];
+  assign free_ptr = free_mem;
 
   reg [3:0] state;
   reg [3:0] next_state;
@@ -117,12 +122,16 @@ module memory_unit(
     mem_addr1 <= 0;
     mem_addr2 <= 0;
     mem_data_in <= 0;
+    mem_write <= 0;
 
     is_ready_reg <= 0;
-    max_memory <= 1022;//1020;
+    max_memory <= memory_mask - 2'd2;
     old_root <= 1;
     new_root <= memory_mask;
-    need_mem <= (free_addr - old_root);
+    free_addr <= 0;
+    read_data1 <= 0;
+    read_data2 <= 0;
+    need_mem <= 0;
 `ifdef TRACE_GC
     gc_prev <= 1'b0;
 `endif
@@ -155,7 +164,7 @@ module memory_unit(
     // Record the start of the free memory store
     STATE_INIT_STORE_FREE_MEM: begin
       state <= STATE_INIT_CLEAR_NIL;
-      free_mem <= mem_data_out1[9:0];
+      free_mem <= mem_data_out1[`memory_addr_width - 1:0];
     end
     // Clear the nil pointer
     STATE_INIT_CLEAR_NIL: begin
@@ -201,7 +210,7 @@ module memory_unit(
           need_mem <= (free_mem - old_root) + write_data;
           if((free_mem-old_root) + write_data <= max_memory) begin // if you have enough free memory
             free_addr <= free_mem;
-            free_mem <= free_mem + write_data;
+            free_mem <= free_mem_next;
             state <= STATE_FREE_WAIT;
 `ifdef TRACE_FREE
             $display("mmu get_free ok free_addr %0d new_free_mem %0d", free_mem, free_mem + write_data);
@@ -455,6 +464,7 @@ module memory_unit(
           debug_sig <= 1;
           read_data1 <= gc_h; // replace with new root
           free_mem <= gc_n;
+          free_addr <= gc_n;
           old_root <= new_root;
           new_root <= old_root;
           //gc_state <= GC_WTF;

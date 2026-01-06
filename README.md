@@ -69,9 +69,11 @@ Register map (byte offsets):
 - `0x28` HINT: hint noun [27:0]
 - `0x2C` STREAM_CTRL: bit0 `start` (use MEM_ADDR as base), bit1 `abort`
 - `0x30` STREAM_STATUS: bit0 `active`, bit1 `pending`, bit2 `done`, bit3 `error` (write any value to clear done/error)
+- `0x34` FREE_PTR: free memory pointer (read-only)
 
 Streaming writes sequential 64-bit words starting at `MEM_ADDR`. Assert `STREAM_CTRL.start`, then drive `s_axis_tdata` with `s_axis_tvalid` until `s_axis_tlast` marks the final word. The core start is gated while a stream is active; `s_axis_tready` deasserts while a write is in flight.
 `AXI_ADDR_WIDTH` defaults to 12 to cover the full register map.
+`FREE_PTR` mirrors the allocator head and is most useful while the core is idle.
 
 To run the AXI-lite smoke test:
 
@@ -84,6 +86,11 @@ vvp nockpu_axi_lite_tb.vvp +mem=memory/constant_tb.hex
 
 `verilog/nockpu_u55c.v` exposes the AXI-lite and AXI-stream ports with Vitis-style naming (`ap_clk`, `ap_rst_n`, `s_axi_control_*`, `s_axis_mem_*`). The `interrupt` output mirrors the core `done` signal.
 
+## Configuration Knobs
+
+- `memory_addr_width` can be overridden at compile time with `-Dmemory_addr_width=<N>`; memory images must match the new depth.
+- `mem_traversal` and `equal_block` accept a `STACK_DEPTH` parameter. The top-level wrappers expose `STACK_DEPTH_TRAV` and `STACK_DEPTH_EQUAL` parameters (defaults 2048).
+- You can also override the wrapper defaults with `-DNPU_STACK_DEPTH_TRAV=<N>` and `-DNPU_STACK_DEPTH_EQUAL=<N>` at compile time.
 
 # Project Layout
 

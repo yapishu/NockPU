@@ -19,6 +19,7 @@ localparam [AXI_ADDR_WIDTH-1:0] REG_MEM_RDATA_LO = 12'h020;
 localparam [AXI_ADDR_WIDTH-1:0] REG_MEM_RDATA_HI = 12'h024;
 localparam [AXI_ADDR_WIDTH-1:0] REG_STREAM_CTRL  = 12'h02C;
 localparam [AXI_ADDR_WIDTH-1:0] REG_STREAM_STATUS = 12'h030;
+localparam [AXI_ADDR_WIDTH-1:0] REG_FREE_PTR     = 12'h034;
 
 reg clk;
 reg rst;
@@ -185,12 +186,15 @@ reg [31:0] status;
 reg [31:0] lo;
 reg [31:0] hi;
 reg [8*256-1:0] mem_init_file;
+reg [`memory_addr_width - 1:0] expected_free;
+localparam integer MEM_DEPTH = 1 << `memory_addr_width;
+localparam integer MEM_LAST = MEM_DEPTH - 1;
 initial begin
   mem_init_file = MEM_INIT_FILE;
   if ($value$plusargs("mem=%s", mem_init_file)) begin
   end
   if (mem_init_file != "") begin
-    $readmemh(mem_init_file, dut.core.mem.ram.ram, 0, 2047);
+    $readmemh(mem_init_file, dut.core.mem.ram.ram, 0, MEM_LAST);
   end
 
   s_axi_awaddr = 0;
@@ -209,6 +213,22 @@ initial begin
   rst = 1'b0;
   repeat (4) @(posedge clk);
   rst = 1'b1;
+
+  cycles = 0;
+  do begin
+    axi_read(REG_STATUS, status);
+    cycles = cycles + 1;
+  end while (!status[2] && cycles < MAX_CYCLES);
+  if (!status[2]) begin
+    $display("FAIL host_ready timeout");
+    $finish;
+  end
+  expected_free = dut.core.mem.ram.ram[0][`memory_addr_width - 1:0];
+  axi_read(REG_FREE_PTR, lo);
+  if (lo[`memory_addr_width - 1:0] !== expected_free) begin
+    $display("FAIL free_ptr expected %0d got %0d", expected_free, lo[`memory_addr_width - 1:0]);
+    $finish;
+  end
 
   // Read memory word at address 1 via host read command.
   axi_write(REG_MEM_ADDR, 32'd1);

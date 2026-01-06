@@ -4,7 +4,9 @@
 `include "execute.vh"
 
 
-module equal_block (
+module equal_block #(
+  parameter integer STACK_DEPTH = 2048
+) (
   input clk,
   input rst,
   output reg [7:0] equal_error,
@@ -30,7 +32,6 @@ module equal_block (
   reg is_finished_reg;
   assign finished = is_finished_reg;
 
-  localparam integer STACK_DEPTH = 2048;
   reg [`memory_addr_width - 1:0] cmp_stack1 [0:STACK_DEPTH - 1];
   reg [`memory_addr_width - 1:0] cmp_stack2 [0:STACK_DEPTH - 1];
   reg [`memory_addr_width:0] cmp_stack_ptr;
