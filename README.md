@@ -52,7 +52,7 @@ vvp nockpu_top_tb.vvp +mem=memory/constant_tb.hex
 
 ## AXI4-Lite Wrapper (nockpu_axi_lite)
 
-`verilog/nockpu_axi_lite.v` wraps `nockpu_top` with a 32-bit AXI4-Lite slave. It exposes control/status plus a host memory command interface for loading and reading nouns while the core is idle.
+`verilog/nockpu_axi_lite.v` wraps `nockpu_top` with a 32-bit AXI4-Lite slave. It exposes control/status plus a host memory command interface and an AXI4-Stream bulk loader for writing nouns while the core is idle.
 
 Register map (byte offsets):
 
@@ -67,6 +67,11 @@ Register map (byte offsets):
 - `0x20` MEM_RDATA_LO: read data [31:0]
 - `0x24` MEM_RDATA_HI: read data [63:32]
 - `0x28` HINT: hint noun [27:0]
+- `0x2C` STREAM_CTRL: bit0 `start` (use MEM_ADDR as base), bit1 `abort`
+- `0x30` STREAM_STATUS: bit0 `active`, bit1 `pending`, bit2 `done`, bit3 `error` (write any value to clear done/error)
+
+Streaming writes sequential 64-bit words starting at `MEM_ADDR`. Assert `STREAM_CTRL.start`, then drive `s_axis_tdata` with `s_axis_tvalid` until `s_axis_tlast` marks the final word. The core start is gated while a stream is active; `s_axis_tready` deasserts while a write is in flight.
+`AXI_ADDR_WIDTH` defaults to 12 to cover the full register map.
 
 To run the AXI-lite smoke test:
 
@@ -74,6 +79,10 @@ To run the AXI-lite smoke test:
 iverilog -g2012 -s nockpu_axi_lite_tb -o nockpu_axi_lite_tb.vvp -c command_file verilog/nockpu_top.v verilog/nockpu_axi_lite.v testbenches/nockpu_axi_lite_tb.v
 vvp nockpu_axi_lite_tb.vvp +mem=memory/constant_tb.hex
 ```
+
+## U55c Wrapper (nockpu_u55c)
+
+`verilog/nockpu_u55c.v` exposes the AXI-lite and AXI-stream ports with Vitis-style naming (`ap_clk`, `ap_rst_n`, `s_axi_control_*`, `s_axis_mem_*`). The `interrupt` output mirrors the core `done` signal.
 
 
 # Project Layout

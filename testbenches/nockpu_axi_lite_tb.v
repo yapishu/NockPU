@@ -5,22 +5,25 @@ module nockpu_axi_lite_tb();
 
 parameter MEM_INIT_FILE = "./memory/constant_tb.hex";
 parameter integer MAX_CYCLES = 200000;
+localparam integer AXI_ADDR_WIDTH = 12;
 
-localparam REG_CONTROL      = 8'h00;
-localparam REG_STATUS       = 8'h04;
-localparam REG_START_ADDR   = 8'h08;
-localparam REG_MEM_ADDR     = 8'h0C;
-localparam REG_MEM_WDATA_LO = 8'h10;
-localparam REG_MEM_WDATA_HI = 8'h14;
-localparam REG_MEM_CMD      = 8'h18;
-localparam REG_MEM_STATUS   = 8'h1C;
-localparam REG_MEM_RDATA_LO = 8'h20;
-localparam REG_MEM_RDATA_HI = 8'h24;
+localparam [AXI_ADDR_WIDTH-1:0] REG_CONTROL      = 12'h000;
+localparam [AXI_ADDR_WIDTH-1:0] REG_STATUS       = 12'h004;
+localparam [AXI_ADDR_WIDTH-1:0] REG_START_ADDR   = 12'h008;
+localparam [AXI_ADDR_WIDTH-1:0] REG_MEM_ADDR     = 12'h00C;
+localparam [AXI_ADDR_WIDTH-1:0] REG_MEM_WDATA_LO = 12'h010;
+localparam [AXI_ADDR_WIDTH-1:0] REG_MEM_WDATA_HI = 12'h014;
+localparam [AXI_ADDR_WIDTH-1:0] REG_MEM_CMD      = 12'h018;
+localparam [AXI_ADDR_WIDTH-1:0] REG_MEM_STATUS   = 12'h01C;
+localparam [AXI_ADDR_WIDTH-1:0] REG_MEM_RDATA_LO = 12'h020;
+localparam [AXI_ADDR_WIDTH-1:0] REG_MEM_RDATA_HI = 12'h024;
+localparam [AXI_ADDR_WIDTH-1:0] REG_STREAM_CTRL  = 12'h02C;
+localparam [AXI_ADDR_WIDTH-1:0] REG_STREAM_STATUS = 12'h030;
 
 reg clk;
 reg rst;
 
-reg [7:0] s_axi_awaddr;
+reg [AXI_ADDR_WIDTH-1:0] s_axi_awaddr;
 reg s_axi_awvalid;
 wire s_axi_awready;
 reg [31:0] s_axi_wdata;
@@ -30,15 +33,22 @@ wire s_axi_wready;
 wire [1:0] s_axi_bresp;
 wire s_axi_bvalid;
 reg s_axi_bready;
-reg [7:0] s_axi_araddr;
+reg [AXI_ADDR_WIDTH-1:0] s_axi_araddr;
 reg s_axi_arvalid;
 wire s_axi_arready;
 wire [31:0] s_axi_rdata;
 wire [1:0] s_axi_rresp;
 wire s_axi_rvalid;
 reg s_axi_rready;
+reg [63:0] s_axis_tdata;
+reg s_axis_tvalid;
+reg s_axis_tlast;
+wire s_axis_tready;
+wire core_done;
 
-nockpu_axi_lite dut(
+nockpu_axi_lite #(
+  .AXI_ADDR_WIDTH (AXI_ADDR_WIDTH)
+) dut(
   .clk (clk),
   .rst (rst),
   .s_axi_awaddr (s_axi_awaddr),
@@ -57,7 +67,12 @@ nockpu_axi_lite dut(
   .s_axi_rdata (s_axi_rdata),
   .s_axi_rresp (s_axi_rresp),
   .s_axi_rvalid (s_axi_rvalid),
-  .s_axi_rready (s_axi_rready)
+  .s_axi_rready (s_axi_rready),
+  .s_axis_tdata (s_axis_tdata),
+  .s_axis_tvalid (s_axis_tvalid),
+  .s_axis_tlast (s_axis_tlast),
+  .s_axis_tready (s_axis_tready),
+  .core_done (core_done)
 );
 
 initial begin
@@ -66,10 +81,11 @@ initial begin
 end
 
 task axi_write;
-  input [7:0] addr;
+  input [AXI_ADDR_WIDTH-1:0] addr;
   input [31:0] data;
   integer wait_cycles;
   begin
+    @(posedge clk);
     s_axi_awaddr = addr;
     s_axi_awvalid = 1'b1;
     s_axi_wdata = data;
@@ -104,10 +120,11 @@ task axi_write;
 endtask
 
 task axi_read;
-  input [7:0] addr;
+  input [AXI_ADDR_WIDTH-1:0] addr;
   output [31:0] data;
   integer wait_cycles;
   begin
+    @(posedge clk);
     s_axi_araddr = addr;
     s_axi_arvalid = 1'b1;
     s_axi_rready = 1'b0;
@@ -138,12 +155,36 @@ task axi_read;
   end
 endtask
 
+task axis_send;
+  input [63:0] data;
+  input last;
+  integer wait_cycles;
+  begin
+    s_axis_tdata = data;
+    s_axis_tlast = last;
+    s_axis_tvalid = 1'b1;
+    wait_cycles = 0;
+    while (!s_axis_tready && wait_cycles < MAX_CYCLES) begin
+      @(posedge clk);
+      wait_cycles = wait_cycles + 1;
+    end
+    if (!s_axis_tready) begin
+      $display("FAIL axis_send tready timeout");
+      $finish;
+    end
+    @(posedge clk);
+    @(negedge clk);
+    s_axis_tvalid = 1'b0;
+    s_axis_tlast = 1'b0;
+    s_axis_tdata = 64'b0;
+  end
+endtask
+
 integer cycles;
 reg [31:0] status;
 reg [31:0] lo;
 reg [31:0] hi;
 reg [8*256-1:0] mem_init_file;
-
 initial begin
   mem_init_file = MEM_INIT_FILE;
   if ($value$plusargs("mem=%s", mem_init_file)) begin
@@ -161,6 +202,9 @@ initial begin
   s_axi_araddr = 0;
   s_axi_arvalid = 0;
   s_axi_rready = 0;
+  s_axis_tdata = 0;
+  s_axis_tvalid = 0;
+  s_axis_tlast = 0;
 
   rst = 1'b0;
   repeat (4) @(posedge clk);
@@ -215,6 +259,64 @@ initial begin
   axi_read(REG_MEM_RDATA_HI, hi);
   if ({hi, lo} !== 64'h0123456789abcdef) begin
     $display("FAIL mem write readback expected 0123456789abcdef got %h%h", hi, lo);
+    $finish;
+  end
+
+  // Stream loader write/readback sanity.
+  axi_write(REG_STREAM_STATUS, 32'h1);
+  axi_write(REG_MEM_ADDR, 32'd30);
+  axi_write(REG_STREAM_CTRL, 32'h1);
+  axis_send(64'h1111222233334444, 1'b0);
+  axis_send(64'h5555666677778888, 1'b1);
+  cycles = 0;
+  do begin
+    axi_read(REG_STREAM_STATUS, status);
+    cycles = cycles + 1;
+  end while (!status[2] && cycles < MAX_CYCLES);
+  if (!status[2]) begin
+    $display("FAIL stream done timeout");
+    $finish;
+  end
+  if (status[3]) begin
+    $display("FAIL stream status error set");
+    $finish;
+  end
+
+  axi_write(REG_MEM_STATUS, 32'h1);
+  axi_write(REG_MEM_ADDR, 32'd30);
+  axi_write(REG_MEM_CMD, 32'h1);
+  cycles = 0;
+  do begin
+    axi_read(REG_MEM_STATUS, status);
+    cycles = cycles + 1;
+  end while (!status[1] && cycles < MAX_CYCLES);
+  if (!status[1]) begin
+    $display("FAIL stream mem read timeout");
+    $finish;
+  end
+  axi_read(REG_MEM_RDATA_LO, lo);
+  axi_read(REG_MEM_RDATA_HI, hi);
+  if ({hi, lo} !== 64'h1111222233334444) begin
+    $display("FAIL stream readback expected 1111222233334444 got %h%h", hi, lo);
+    $finish;
+  end
+
+  axi_write(REG_MEM_STATUS, 32'h1);
+  axi_write(REG_MEM_ADDR, 32'd31);
+  axi_write(REG_MEM_CMD, 32'h1);
+  cycles = 0;
+  do begin
+    axi_read(REG_MEM_STATUS, status);
+    cycles = cycles + 1;
+  end while (!status[1] && cycles < MAX_CYCLES);
+  if (!status[1]) begin
+    $display("FAIL stream mem read timeout second word");
+    $finish;
+  end
+  axi_read(REG_MEM_RDATA_LO, lo);
+  axi_read(REG_MEM_RDATA_HI, hi);
+  if ({hi, lo} !== 64'h5555666677778888) begin
+    $display("FAIL stream readback expected 5555666677778888 got %h%h", hi, lo);
     $finish;
   end
 

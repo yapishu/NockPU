@@ -1,7 +1,7 @@
 `include "memory_unit.vh"
 
 module nockpu_axi_lite #(
-  parameter integer AXI_ADDR_WIDTH = 8
+  parameter integer AXI_ADDR_WIDTH = 12
 )(
   input clk,
   input rst,
@@ -22,7 +22,13 @@ module nockpu_axi_lite #(
   output reg [31:0] s_axi_rdata,
   output reg [1:0] s_axi_rresp,
   output reg s_axi_rvalid,
-  input s_axi_rready
+  input s_axi_rready,
+  // AXI4-Stream input for bulk memory writes.
+  input [63:0] s_axis_tdata,
+  input s_axis_tvalid,
+  input s_axis_tlast,
+  output wire s_axis_tready,
+  output wire core_done
 );
   // Register map (byte offsets).
   localparam REG_CONTROL      = 6'h00;
@@ -36,6 +42,8 @@ module nockpu_axi_lite #(
   localparam REG_MEM_RDATA_LO = 6'h20;
   localparam REG_MEM_RDATA_HI = 6'h24;
   localparam REG_HINT         = 6'h28;
+  localparam REG_STREAM_CTRL  = 6'h2C;
+  localparam REG_STREAM_STATUS = 6'h30;
 
   localparam REG_CONTROL_W      = REG_CONTROL >> 2;
   localparam REG_STATUS_W       = REG_STATUS >> 2;
@@ -48,6 +56,8 @@ module nockpu_axi_lite #(
   localparam REG_MEM_RDATA_LO_W = REG_MEM_RDATA_LO >> 2;
   localparam REG_MEM_RDATA_HI_W = REG_MEM_RDATA_HI >> 2;
   localparam REG_HINT_W         = REG_HINT >> 2;
+  localparam REG_STREAM_CTRL_W  = REG_STREAM_CTRL >> 2;
+  localparam REG_STREAM_STATUS_W = REG_STREAM_STATUS >> 2;
 
   // AXI-lite write holding.
   reg aw_valid;
@@ -86,9 +96,14 @@ module nockpu_axi_lite #(
   reg [31:0] mem_wdata_hi;
   reg [31:0] mem_rdata_lo;
   reg [31:0] mem_rdata_hi;
+  reg [`memory_addr_width - 1:0] host_addr_reg;
+  reg [`memory_data_width - 1:0] host_wdata_reg;
   reg start_pulse;
   reg mem_cmd_pulse;
   reg mem_cmd_we;
+  reg stream_start_pulse;
+  reg stream_abort_pulse;
+  reg stream_status_clear;
 
   // Memory command state.
   reg mem_busy;
@@ -99,6 +114,14 @@ module nockpu_axi_lite #(
   reg mem_issued;
   reg mem_status_clear;
   reg mem_cmd_invalid;
+  reg stream_active;
+  reg stream_pending;
+  reg stream_done;
+  reg stream_error;
+  reg stream_last_buf;
+  reg stream_last_inflight;
+  reg [`memory_addr_width - 1:0] stream_addr;
+  reg [`memory_data_width - 1:0] stream_data_buf;
 
   // Core wires.
   wire host_ready;
@@ -111,16 +134,20 @@ module nockpu_axi_lite #(
   wire [`noun_width-1:0] hint;
   wire hint_tag;
 
+  wire stream_fire;
+  assign s_axis_tready = stream_active && !stream_pending && !stream_last_inflight && !busy && !mem_busy;
+  assign stream_fire = s_axis_tvalid && s_axis_tready;
+
   // Instantiate core.
   nockpu_top core(
     .clk (clk),
     .rst (rst),
-    .start (start_pulse),
+    .start (start_pulse && !stream_active && !stream_pending),
     .start_addr (start_addr_reg),
     .host_req (host_req),
     .host_we (host_we),
-    .host_addr (mem_addr_reg),
-    .host_wdata ({mem_wdata_hi, mem_wdata_lo}),
+    .host_addr (host_addr_reg),
+    .host_wdata (host_wdata_reg),
     .host_ready (host_ready),
     .host_rdata (host_rdata),
     .host_rvalid (host_rvalid),
@@ -131,6 +158,7 @@ module nockpu_axi_lite #(
     .hint (hint),
     .hint_tag (hint_tag)
   );
+  assign core_done = done;
 
   // AXI write handling.
   always @(posedge clk or negedge rst) begin
@@ -150,11 +178,17 @@ module nockpu_axi_lite #(
       start_pulse <= 1'b0;
       mem_cmd_pulse <= 1'b0;
       mem_cmd_we <= 1'b0;
+      stream_start_pulse <= 1'b0;
+      stream_abort_pulse <= 1'b0;
+      stream_status_clear <= 1'b0;
       mem_status_clear <= 1'b0;
       mem_cmd_invalid <= 1'b0;
     end else begin
       start_pulse <= 1'b0;
       mem_cmd_pulse <= 1'b0;
+      stream_start_pulse <= 1'b0;
+      stream_abort_pulse <= 1'b0;
+      stream_status_clear <= 1'b0;
       mem_status_clear <= 1'b0;
       mem_cmd_invalid <= 1'b0;
 
@@ -195,6 +229,13 @@ module nockpu_axi_lite #(
           end
           REG_MEM_STATUS_W: begin
             mem_status_clear <= 1'b1;
+          end
+          REG_STREAM_CTRL_W: begin
+            if (w_data[0]) stream_start_pulse <= 1'b1;
+            if (w_data[1]) stream_abort_pulse <= 1'b1;
+          end
+          REG_STREAM_STATUS_W: begin
+            stream_status_clear <= 1'b1;
           end
           default: begin
           end
@@ -268,6 +309,9 @@ module nockpu_axi_lite #(
           REG_HINT_W: begin
             s_axi_rdata <= {4'b0, hint};
           end
+          REG_STREAM_STATUS_W: begin
+            s_axi_rdata <= {28'b0, stream_error, stream_done, stream_pending, stream_active};
+          end
           default: begin
             s_axi_rdata <= 32'b0;
           end
@@ -289,11 +333,70 @@ module nockpu_axi_lite #(
   end
 
   // Memory command FSM (idle core only).
-  localparam MEM_IDLE       = 2'b00;
-  localparam MEM_ISSUE      = 2'b01;
-  localparam MEM_WAIT_READ  = 2'b10;
-  localparam MEM_WAIT_WRITE = 2'b11;
-  reg [1:0] mem_state;
+  localparam MEM_IDLE        = 3'b000;
+  localparam MEM_ISSUE       = 3'b001;
+  localparam MEM_WAIT_READ   = 3'b010;
+  localparam MEM_WAIT_WRITE  = 3'b011;
+  localparam MEM_STREAM_ISSUE = 3'b100;
+  localparam MEM_STREAM_WAIT  = 3'b101;
+  reg [2:0] mem_state;
+
+  // Stream loader state.
+  always @(posedge clk or negedge rst) begin
+    if (!rst) begin
+      stream_active <= 1'b0;
+      stream_pending <= 1'b0;
+      stream_done <= 1'b0;
+      stream_error <= 1'b0;
+      stream_last_buf <= 1'b0;
+      stream_last_inflight <= 1'b0;
+      stream_addr <= {`memory_addr_width{1'b0}};
+      stream_data_buf <= {`memory_data_width{1'b0}};
+    end else begin
+      if (stream_status_clear) begin
+        stream_done <= 1'b0;
+        stream_error <= 1'b0;
+      end
+
+      if (stream_fire) begin
+        stream_data_buf <= s_axis_tdata;
+        stream_last_buf <= s_axis_tlast;
+        stream_pending <= 1'b1;
+      end
+
+      if (mem_state == MEM_STREAM_ISSUE && host_ready) begin
+        stream_last_inflight <= stream_last_buf;
+        stream_addr <= stream_addr + 1'b1;
+      end
+
+      if (mem_state == MEM_STREAM_WAIT && host_ready) begin
+        stream_pending <= 1'b0;
+        if (stream_last_inflight) begin
+          stream_active <= 1'b0;
+          stream_done <= 1'b1;
+          stream_last_inflight <= 1'b0;
+        end
+      end
+
+      if (stream_abort_pulse) begin
+        stream_active <= 1'b0;
+        stream_pending <= 1'b0;
+        stream_done <= 1'b0;
+        stream_last_inflight <= 1'b0;
+        stream_error <= 1'b1;
+      end else if (stream_start_pulse) begin
+        if (stream_active || mem_state != MEM_IDLE || mem_cmd_pulse || busy) begin
+          stream_error <= 1'b1;
+        end else begin
+          stream_active <= 1'b1;
+          stream_done <= 1'b0;
+          stream_pending <= 1'b0;
+          stream_last_inflight <= 1'b0;
+          stream_addr <= mem_addr_reg;
+        end
+      end
+    end
+  end
 
   always @(posedge clk or negedge rst) begin
     if (!rst) begin
@@ -304,6 +407,8 @@ module nockpu_axi_lite #(
       host_req <= 1'b0;
       host_we <= 1'b0;
       mem_issued <= 1'b0;
+      host_addr_reg <= {`memory_addr_width{1'b0}};
+      host_wdata_reg <= {`memory_data_width{1'b0}};
     end else begin
       host_req <= 1'b0;
       if (mem_status_clear) begin
@@ -313,7 +418,7 @@ module nockpu_axi_lite #(
       if (mem_cmd_invalid) begin
         mem_error <= 1'b1;
       end
-      if (mem_cmd_pulse && mem_state != MEM_IDLE) begin
+      if (mem_cmd_pulse && (mem_state != MEM_IDLE || stream_active)) begin
         mem_error <= 1'b1;
       end
       case (mem_state)
@@ -321,12 +426,24 @@ module nockpu_axi_lite #(
           mem_issued <= 1'b0;
           mem_busy <= 1'b0;
           if (mem_cmd_pulse) begin
-            if (busy) begin
+            if (busy || stream_active) begin
               mem_error <= 1'b1;
             end else begin
               mem_busy <= 1'b1;
               host_we <= mem_cmd_we;
+              host_addr_reg <= mem_addr_reg;
+              host_wdata_reg <= {mem_wdata_hi, mem_wdata_lo};
               mem_state <= MEM_ISSUE;
+            end
+          end else if (stream_active && stream_pending) begin
+            if (busy) begin
+              mem_error <= 1'b1;
+            end else begin
+              mem_busy <= 1'b1;
+              host_we <= 1'b1;
+              host_addr_reg <= stream_addr;
+              host_wdata_reg <= stream_data_buf;
+              mem_state <= MEM_STREAM_ISSUE;
             end
           end
         end
@@ -350,6 +467,20 @@ module nockpu_axi_lite #(
           mem_busy <= 1'b1;
           if (host_ready) begin
             mem_done <= 1'b1;
+            mem_busy <= 1'b0;
+            mem_state <= MEM_IDLE;
+          end
+        end
+        MEM_STREAM_ISSUE: begin
+          mem_busy <= 1'b1;
+          host_req <= 1'b1;
+          if (host_ready) begin
+            mem_state <= MEM_STREAM_WAIT;
+          end
+        end
+        MEM_STREAM_WAIT: begin
+          mem_busy <= 1'b1;
+          if (host_ready) begin
             mem_busy <= 1'b0;
             mem_state <= MEM_IDLE;
           end
