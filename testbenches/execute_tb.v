@@ -112,7 +112,9 @@ wire [`memory_data_width - 1:0] execute_data;
 wire execute_finished;
 wire [3:0] execute_return_sys_func;
 wire [3:0] execute_return_state;
-wire [`tag_width - 1:0] error;//do we need?
+wire [`tag_width - 1:0] exec_error;//do we need?
+wire [`tag_width - 1:0] error;
+assign error = (exec_error != 0) ? exec_error : incr_error;
 
 //Signal from cell module to memory Mux
 wire [1:0] mem_func_cell;
@@ -290,13 +292,13 @@ mem_traversal traversal(.power (power),
                         .module_address(module_address),
                         .module_data(module_data),
                         .module_finished(module_finished),
-                        .execute_return_sys_func(execute_return_sys_func),
-                        .execute_return_state(execute_return_state));
+                        .return_sys_func(return_sys_func),
+                        .return_state(return_state));
 
 //Instantiate Nock Execute Module
 execute execute(.clk(clk),
                 .rst(reset),
-                .error(error),
+                .error(exec_error),
                 .execute_start(select),
                 .execute_address(execute_address),
                 .execute_data(execute_data),

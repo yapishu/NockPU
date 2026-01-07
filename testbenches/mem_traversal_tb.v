@@ -98,8 +98,8 @@ mem_traversal traversal(.power (power),
                         .module_data (module_data),
                         .mux_controller (mux_controller),
                         .module_finished (module_finished),
-                        .execute_return_sys_func (execute_return_sys_func),
-                        .execute_return_state (execute_return_state));
+                        .return_sys_func (execute_return_sys_func),
+                        .return_state (execute_return_state));
 
 // Setup Clock
 initial begin

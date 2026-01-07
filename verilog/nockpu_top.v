@@ -257,6 +257,7 @@ module nockpu_top #(
   wire execute_finished;
   wire [3:0] execute_return_sys_func;
   wire [3:0] execute_return_state;
+  wire [7:0] exec_error;
 
   wire [`memory_addr_width - 1:0] cell_address;
   wire [`memory_data_width - 1:0] cell_data;
@@ -271,6 +272,8 @@ module nockpu_top #(
   wire [3:0] incr_return_sys_func;
   wire [3:0] incr_return_state;
   wire [7:0] incr_error;
+
+  assign error = (exec_error != 0) ? exec_error : incr_error;
 
   wire [`memory_addr_width - 1:0] equal_address;
   wire [`memory_data_width - 1:0] equal_data;
@@ -348,15 +351,15 @@ module nockpu_top #(
     .module_address (module_address),
     .module_data (module_data),
     .module_finished (module_finished),
-    .execute_return_sys_func (execute_return_sys_func),
-    .execute_return_state (execute_return_state)
+    .return_sys_func (return_sys_func),
+    .return_state (return_state)
   );
 
   // Execute module.
   execute execute(
     .clk (clk),
     .rst (rst),
-    .error (error),
+    .error (exec_error),
     .execute_start (select),
     .execute_address (execute_address),
     .execute_data (execute_data),

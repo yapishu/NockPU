@@ -28,8 +28,8 @@ module mem_traversal #(
   output reg [`memory_data_width - 1:0] module_data,
   output reg [2:0] mux_controller,
   input module_finished,
-  input [3:0] execute_return_sys_func,
-  input [3:0] execute_return_state
+  input [3:0] return_sys_func,
+  input [3:0] return_state
 );
   // finish signal
   reg is_finished_reg;
@@ -502,9 +502,8 @@ module mem_traversal #(
               module_done_pending <= 1'b1;
             end
             if (module_finished || module_done_pending) begin
-              if (active_module == `MUX_EXECUTE
-              && execute_return_sys_func == `SYS_FUNC_EXECUTE
-              && execute_return_state == `SYS_EXECUTE_ERROR) begin
+              if (return_sys_func == `SYS_FUNC_EXECUTE
+              && return_state == `SYS_EXECUTE_ERROR) begin
                 is_finished_reg <= 1'b1;
                 state <= STATE_IDLE;
                 mux_controller <= `MUX_TRAVERSAL;
