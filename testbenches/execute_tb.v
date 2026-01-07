@@ -113,8 +113,11 @@ wire execute_finished;
 wire [3:0] execute_return_sys_func;
 wire [3:0] execute_return_state;
 wire [`tag_width - 1:0] exec_error;//do we need?
+wire [`tag_width - 1:0] traversal_error;
 wire [`tag_width - 1:0] error;
-assign error = (exec_error != 0) ? exec_error : incr_error;
+assign error = (traversal_error != 0) ? traversal_error
+             : (exec_error != 0) ? exec_error
+             : incr_error;
 
 //Signal from cell module to memory Mux
 wire [1:0] mem_func_cell;
@@ -287,7 +290,7 @@ mem_traversal traversal(.power (power),
                         .free_addr (free_addr),
                         .write_data (write_data_mtu),
                         .finished(traversal_finished),
-                        .error(error),
+                        .traversal_error(traversal_error),
                         .mux_controller(select),
                         .module_address(module_address),
                         .module_data(module_data),

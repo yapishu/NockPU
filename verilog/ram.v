@@ -10,7 +10,7 @@ module ram(
 );
 
   localparam integer RAM_DEPTH = 1 << `memory_addr_width;
-  reg [`memory_data_width - 1:0] ram [0:RAM_DEPTH - 1];
+  (* ramstyle = "M10K" *) reg [`memory_data_width - 1:0] ram [0:RAM_DEPTH - 1];
 
   always @(posedge clock) begin
     if (wren) begin

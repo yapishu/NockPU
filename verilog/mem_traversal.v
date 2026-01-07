@@ -23,7 +23,7 @@ module mem_traversal #(
   output reg [`memory_addr_width - 1:0] address2,
   output reg [1:0] mem_func,
   output reg [`memory_data_width - 1:0] write_data,
-  input [7:0] error,
+  output reg [7:0] traversal_error,
   output reg [`memory_addr_width - 1:0] module_address,
   output reg [`memory_data_width - 1:0] module_data,
   output reg [2:0] mux_controller,
@@ -107,6 +107,7 @@ module mem_traversal #(
       mem_tag <= 0;
       hed <= 0;
       tel <= 0;
+      traversal_error <= 0;
       mem_ready_prev <= 1'b0;
       trav_stack_ptr <= 0;
       in_stack <= {MEM_DEPTH{1'b0}};
@@ -132,6 +133,7 @@ module mem_traversal #(
             state <= STATE_GC_WAIT;
           end else if (trav_stack_ptr == 0) begin
             if (mem_ready) begin
+              traversal_error <= 0;
               root_addr <= start_addr;
               trav_stack_addr[0] <= start_addr;
               trav_stack_state[0] <= TRAV_ENTER;
@@ -247,6 +249,7 @@ module mem_traversal #(
                                mem_addr,
                                mem_data);
 `endif
+                      traversal_error <= `ERROR_TRAV_STACK_OVERFLOW;
                       is_finished_reg <= 1'b1;
                       state <= STATE_IDLE;
                     end else begin
@@ -285,6 +288,7 @@ module mem_traversal #(
                                    mem_addr,
                                    mem_data);
 `endif
+                          traversal_error <= `ERROR_TRAV_UNKNOWN_OPCODE;
                           is_finished_reg <= 1'b1;
                           state <= STATE_IDLE;
                           mux_controller <= `MUX_TRAVERSAL;
@@ -308,6 +312,7 @@ module mem_traversal #(
                              mem_addr,
                              mem_data);
 `endif
+                    traversal_error <= `ERROR_TRAV_STACK_OVERFLOW;
                     is_finished_reg <= 1'b1;
                     state <= STATE_IDLE;
                   end else begin
@@ -326,6 +331,7 @@ module mem_traversal #(
                              mem_addr,
                              mem_data);
 `endif
+                    traversal_error <= `ERROR_TRAV_STACK_OVERFLOW;
                     is_finished_reg <= 1'b1;
                     state <= STATE_IDLE;
                   end else begin
@@ -374,6 +380,7 @@ module mem_traversal #(
                              mem_addr,
                              mem_data);
 `endif
+                    traversal_error <= `ERROR_TRAV_STACK_OVERFLOW;
                     is_finished_reg <= 1'b1;
                     state <= STATE_IDLE;
                   end else begin
@@ -442,6 +449,7 @@ module mem_traversal #(
                                  mem_addr,
                                  mem_data);
 `endif
+                        traversal_error <= `ERROR_TRAV_UNKNOWN_OPCODE;
                         is_finished_reg <= 1'b1;
                         state <= STATE_IDLE;
                         mux_controller <= `MUX_TRAVERSAL;

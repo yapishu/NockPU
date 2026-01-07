@@ -1,23 +1,21 @@
 `timescale 1ns/1ns
 `include "../verilog/memory_unit.vh"
 
+module mem_traversal_stackless_tb();
 
-module mem_traversal_tb();
-
-//Test Parameters
-parameter MEM_INIT_FILE = "./memory/memory.hex";
+// Test Parameters
+parameter MEM_INIT_FILE = "./memory/traversal_only.hex";
 parameter integer MAX_CYCLES = 200000;
 localparam integer MEM_DEPTH = 1 << `memory_addr_width;
 localparam integer MEM_LAST = MEM_DEPTH - 1;
 
-//Signal Declarations
+// Signal Declarations
 reg MAX10_CLK1_50;
 
 wire clk;
 assign clk = MAX10_CLK1_50;
 
 reg reset;
-
 
 wire power;
 assign power = 1'b1;
@@ -45,15 +43,14 @@ reg [`memory_addr_width - 1:0] start_addr;
 wire [`memory_addr_width - 1:0] root_addr;
 wire [7:0] traversal_error;
 wire module_finished;
-wire [3:0] execute_return_sys_func;
-wire [3:0] execute_return_state;
+wire [3:0] return_sys_func;
+wire [3:0] return_state;
 wire [`memory_addr_width - 1:0] module_address;
 wire [`memory_data_width - 1:0] module_data;
 wire [2:0] mux_controller;
 assign module_finished = 1'b1;
-assign execute_return_sys_func = 4'b0;
-assign execute_return_state = 4'b0;
-
+assign return_sys_func = 4'b0;
+assign return_state = 4'b0;
 
 // Instantiate MTU
 memory_unit mem(.func (mem_func),
@@ -74,7 +71,7 @@ memory_unit mem(.func (mem_func),
                 .mem_data_out2 (mem_data_out2),
                 .rst (reset));
 
-mem_traversal traversal(.power (power),
+mem_traversal_stackless traversal(.power (power),
                         .clk (clk),
                         .rst (reset),
                         .start_addr (start_addr),
@@ -91,29 +88,33 @@ mem_traversal traversal(.power (power),
                         .mem_func (mem_func),
                         .free_addr (free_addr),
                         .write_data (write_data),
-                        .finished(traversal_finished),
+                        .finished (traversal_finished),
                         .traversal_error (traversal_error),
                         .module_address (module_address),
                         .module_data (module_data),
                         .mux_controller (mux_controller),
                         .module_finished (module_finished),
-                        .return_sys_func (execute_return_sys_func),
-                        .return_state (execute_return_state));
+                        .return_sys_func (return_sys_func),
+                        .return_state (return_state));
 
 // Setup Clock
 initial begin
-  MAX10_CLK1_50 =0;
+  MAX10_CLK1_50 = 0;
   forever MAX10_CLK1_50 = #10 ~MAX10_CLK1_50;
 end
 
-
 // Perform Test
 initial begin
+  for (integer idx = 0; idx < MEM_DEPTH; idx = idx + 1) begin
+    mem.ram.ram[idx] = {`memory_data_width{1'b0}};
+  end
   if (MEM_INIT_FILE != "") begin
-    $readmemh(MEM_INIT_FILE, mem.ram.ram, 0, MEM_LAST);
+    $readmemh(MEM_INIT_FILE, mem.ram.ram);
   end
 
   start_addr = 1;
+  traversal_execute = 0;
+
   // Reset
   reset = 1'b0;
   repeat (2) @(posedge clk);

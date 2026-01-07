@@ -39,7 +39,7 @@
 
 set_global_assignment -name FAMILY "MAX 10"
 set_global_assignment -name DEVICE 10M50DAF484C7G
-set_global_assignment -name TOP_LEVEL_ENTITY NPU_UI
+set_global_assignment -name TOP_LEVEL_ENTITY nockpu_de10_uart
 set_global_assignment -name ORIGINAL_QUARTUS_VERSION 20.1.1
 set_global_assignment -name PROJECT_CREATION_TIME_DATE "12:05:25  OCTOBER 05, 2021"
 set_global_assignment -name LAST_QUARTUS_VERSION "20.1.1 Lite Edition"
@@ -119,18 +119,30 @@ set_location_assignment PIN_M20 -to HEX5[4]
 set_location_assignment PIN_N19 -to HEX5[5]
 set_location_assignment PIN_N20 -to HEX5[6]
 set_location_assignment PIN_L19 -to HEX5[7]
+# UART_RX/UART_TX: assign to GPIO header pins per DE10-Lite manual.
+# set_location_assignment PIN_XXXX -to UART_RX
+# set_location_assignment PIN_XXXX -to UART_TX
 set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
 set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
 set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
 set_global_assignment -name POWER_PRESET_COOLING_SOLUTION "23 MM HEAT SINK WITH 200 LFPM AIRFLOW"
 set_global_assignment -name POWER_BOARD_THERMAL_MODEL "NONE (CONSERVATIVE)"
-set_global_assignment -name VERILOG_FILE ../verilog/single_port_ram.v
-set_global_assignment -name VERILOG_FILE ../verilog/memory_mux.v
-set_global_assignment -name VERILOG_FILE ../verilog/execute.v
-set_global_assignment -name QIP_FILE ../verilog/ram.qip
-set_global_assignment -name VERILOG_FILE ../verilog/NPU_UI.v
+set_global_assignment -name VERILOG_FILE ../verilog/ram.v
 set_global_assignment -name VERILOG_FILE ../verilog/memory_unit.v
+set_global_assignment -name VERILOG_FILE ../verilog/memory_mux.v
+set_global_assignment -name VERILOG_FILE ../verilog/control_mux.v
 set_global_assignment -name VERILOG_FILE ../verilog/mem_traversal.v
+set_global_assignment -name VERILOG_FILE ../verilog/mem_traversal_stackless.v
+set_global_assignment -name VERILOG_FILE ../verilog/execute.v
+set_global_assignment -name VERILOG_FILE ../verilog/cell_block.v
+set_global_assignment -name VERILOG_FILE ../verilog/incr_block.v
+set_global_assignment -name VERILOG_FILE ../verilog/equal_block.v
+set_global_assignment -name VERILOG_FILE ../verilog/edit_block.v
+set_global_assignment -name VERILOG_FILE ../verilog/nockpu_top.v
+set_global_assignment -name VERILOG_FILE ../verilog/uart_rx.v
+set_global_assignment -name VERILOG_FILE ../verilog/uart_tx.v
+set_global_assignment -name VERILOG_FILE ../verilog/nockpu_uart_ctrl.v
+set_global_assignment -name VERILOG_FILE ../verilog/nockpu_de10_uart.v
 set_global_assignment -name MIF_FILE ../memory/memory.mif
 set_global_assignment -name HEX_FILE ../memory/memory.hex
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

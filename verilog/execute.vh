@@ -30,6 +30,8 @@
 `define ERROR_INVALID_SLOT            8'h05
 `define ERROR_INVALID_SLOT_HED        8'h06
 `define ERROR_INVALID_SLOT_TEL        8'h07
+`define ERROR_TRAV_STACK_OVERFLOW     8'h08
+`define ERROR_TRAV_UNKNOWN_OPCODE     8'h09
 
 
 `endif

@@ -12,6 +12,13 @@ module nockpu_axi_lite #(
 `else
   parameter integer STACK_DEPTH_EQUAL = 2048
 `endif
+`ifdef NPU_STACKLESS_TRAV
+  ,
+  parameter integer USE_STACKLESS_TRAV = `NPU_STACKLESS_TRAV
+`else
+  ,
+  parameter integer USE_STACKLESS_TRAV = 0
+`endif
 )(
   input clk,
   input rst,
@@ -157,7 +164,8 @@ module nockpu_axi_lite #(
   // Instantiate core.
   nockpu_top #(
     .STACK_DEPTH_TRAV (STACK_DEPTH_TRAV),
-    .STACK_DEPTH_EQUAL (STACK_DEPTH_EQUAL)
+    .STACK_DEPTH_EQUAL (STACK_DEPTH_EQUAL),
+    .USE_STACKLESS_TRAV (USE_STACKLESS_TRAV)
   ) core(
     .clk (clk),
     .rst (rst),

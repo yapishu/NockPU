@@ -13,6 +13,13 @@ module nockpu_top #(
 `else
   parameter integer STACK_DEPTH_EQUAL = 2048
 `endif
+`ifdef NPU_STACKLESS_TRAV
+  ,
+  parameter integer USE_STACKLESS_TRAV = `NPU_STACKLESS_TRAV
+`else
+  ,
+  parameter integer USE_STACKLESS_TRAV = 0
+`endif
 )(
   input clk,
   input rst,
@@ -258,6 +265,7 @@ module nockpu_top #(
   wire [3:0] execute_return_sys_func;
   wire [3:0] execute_return_state;
   wire [7:0] exec_error;
+  wire [7:0] traversal_error;
 
   wire [`memory_addr_width - 1:0] cell_address;
   wire [`memory_data_width - 1:0] cell_data;
@@ -273,7 +281,9 @@ module nockpu_top #(
   wire [3:0] incr_return_state;
   wire [7:0] incr_error;
 
-  assign error = (exec_error != 0) ? exec_error : incr_error;
+  assign error = (traversal_error != 0) ? traversal_error
+               : (exec_error != 0) ? exec_error
+               : incr_error;
 
   wire [`memory_addr_width - 1:0] equal_address;
   wire [`memory_data_width - 1:0] equal_data;
@@ -325,35 +335,67 @@ module nockpu_top #(
   // Traversal.
   wire traversal_finished;
 
-  mem_traversal #(
-    .STACK_DEPTH (STACK_DEPTH_TRAV)
-  ) traversal(
-    .power (power),
-    .clk (clk),
-    .rst (rst),
-    .start_addr (start_addr_reg),
-    .root_addr (root_ptr),
-    .execute (running),
-    .gc (gc),
-    .gc_ready (gc_ready),
-    .mem_ready (mem_ready),
-    .address1 (address1_mtu),
-    .address2 (address2_mtu),
-    .read_data1 (read_data1),
-    .read_data2 (read_data2),
-    .mem_execute (mem_execute_mtu),
-    .mem_func (mem_func_mtu),
-    .free_addr (free_addr),
-    .write_data (write_data_mtu),
-    .finished (traversal_finished),
-    .error (error),
-    .mux_controller (select),
-    .module_address (module_address),
-    .module_data (module_data),
-    .module_finished (module_finished),
-    .return_sys_func (return_sys_func),
-    .return_state (return_state)
-  );
+  generate
+    if (USE_STACKLESS_TRAV) begin : gen_trav_stackless
+      mem_traversal_stackless traversal(
+        .power (power),
+        .clk (clk),
+        .rst (rst),
+        .start_addr (start_addr_reg),
+        .root_addr (root_ptr),
+        .execute (running),
+        .gc (gc),
+        .gc_ready (gc_ready),
+        .mem_ready (mem_ready),
+        .address1 (address1_mtu),
+        .address2 (address2_mtu),
+        .read_data1 (read_data1),
+        .read_data2 (read_data2),
+        .mem_execute (mem_execute_mtu),
+        .mem_func (mem_func_mtu),
+        .free_addr (free_addr),
+        .write_data (write_data_mtu),
+        .finished (traversal_finished),
+        .traversal_error (traversal_error),
+        .mux_controller (select),
+        .module_address (module_address),
+        .module_data (module_data),
+        .module_finished (module_finished),
+        .return_sys_func (return_sys_func),
+        .return_state (return_state)
+      );
+    end else begin : gen_trav_stack
+      mem_traversal #(
+        .STACK_DEPTH (STACK_DEPTH_TRAV)
+      ) traversal(
+        .power (power),
+        .clk (clk),
+        .rst (rst),
+        .start_addr (start_addr_reg),
+        .root_addr (root_ptr),
+        .execute (running),
+        .gc (gc),
+        .gc_ready (gc_ready),
+        .mem_ready (mem_ready),
+        .address1 (address1_mtu),
+        .address2 (address2_mtu),
+        .read_data1 (read_data1),
+        .read_data2 (read_data2),
+        .mem_execute (mem_execute_mtu),
+        .mem_func (mem_func_mtu),
+        .free_addr (free_addr),
+        .write_data (write_data_mtu),
+        .finished (traversal_finished),
+        .traversal_error (traversal_error),
+        .mux_controller (select),
+        .module_address (module_address),
+        .module_data (module_data),
+        .module_finished (module_finished),
+        .return_sys_func (return_sys_func),
+        .return_state (return_state)
+      );
+    end
+  endgenerate
 
   // Execute module.
   execute execute(

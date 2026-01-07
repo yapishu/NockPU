@@ -93,11 +93,16 @@ vvp nockpu_axi_lite_tb.vvp +mem=memory/constant_tb.hex
 
 `verilog/nockpu_u55c.v` exposes the AXI-lite and AXI-stream ports with Vitis-style naming (`ap_clk`, `ap_rst_n`, `s_axi_control_*`, `s_axis_mem_*`). The `interrupt` output mirrors the core `done` signal.
 
+## DE10-Lite UART Loader
+
+`verilog/nockpu_de10_uart.v` adds a UART bridge for loading memory images and reading results on the DE10-Lite. See `documents/de10_uart.md` for wiring and protocol details.
+
 ## Configuration Knobs
 
 - `memory_addr_width` can be overridden at compile time with `-Dmemory_addr_width=<N>`; memory images must match the new depth.
 - `mem_traversal` and `equal_block` accept a `STACK_DEPTH` parameter. The top-level wrappers expose `STACK_DEPTH_TRAV` and `STACK_DEPTH_EQUAL` parameters (defaults 2048).
 - You can also override the wrapper defaults with `-DNPU_STACK_DEPTH_TRAV=<N>` and `-DNPU_STACK_DEPTH_EQUAL=<N>` at compile time.
+- `USE_STACKLESS_TRAV` selects the pointer-reversal (stackless) traversal (`-DNPU_STACKLESS_TRAV=1`); default is stack-based traversal.
 
 # Project Layout
 

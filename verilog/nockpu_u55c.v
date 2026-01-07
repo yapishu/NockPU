@@ -10,6 +10,13 @@ module nockpu_u55c #(
 `else
   parameter integer STACK_DEPTH_EQUAL = 2048
 `endif
+`ifdef NPU_STACKLESS_TRAV
+  ,
+  parameter integer USE_STACKLESS_TRAV = `NPU_STACKLESS_TRAV
+`else
+  ,
+  parameter integer USE_STACKLESS_TRAV = 0
+`endif
 )(
   input ap_clk,
   input ap_rst_n,
@@ -43,7 +50,8 @@ module nockpu_u55c #(
   nockpu_axi_lite #(
     .AXI_ADDR_WIDTH (AXI_ADDR_WIDTH),
     .STACK_DEPTH_TRAV (STACK_DEPTH_TRAV),
-    .STACK_DEPTH_EQUAL (STACK_DEPTH_EQUAL)
+    .STACK_DEPTH_EQUAL (STACK_DEPTH_EQUAL),
+    .USE_STACKLESS_TRAV (USE_STACKLESS_TRAV)
   ) core (
     .clk (ap_clk),
     .rst (ap_rst_n),
