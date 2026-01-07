@@ -55,6 +55,7 @@ module nockpu_axi_lite #(
   localparam REG_STREAM_CTRL  = 6'h2C;
   localparam REG_STREAM_STATUS = 6'h30;
   localparam REG_FREE_PTR     = 6'h34;
+  localparam REG_ROOT_PTR     = 6'h38;
 
   localparam REG_CONTROL_W      = REG_CONTROL >> 2;
   localparam REG_STATUS_W       = REG_STATUS >> 2;
@@ -70,6 +71,7 @@ module nockpu_axi_lite #(
   localparam REG_STREAM_CTRL_W  = REG_STREAM_CTRL >> 2;
   localparam REG_STREAM_STATUS_W = REG_STREAM_STATUS >> 2;
   localparam REG_FREE_PTR_W     = REG_FREE_PTR >> 2;
+  localparam REG_ROOT_PTR_W     = REG_ROOT_PTR >> 2;
 
   // AXI-lite write holding.
   reg aw_valid;
@@ -146,6 +148,7 @@ module nockpu_axi_lite #(
   wire [`noun_width-1:0] hint;
   wire hint_tag;
   wire [`memory_addr_width - 1:0] free_ptr;
+  wire [`memory_addr_width - 1:0] root_ptr;
 
   wire stream_fire;
   assign s_axis_tready = stream_active && !stream_pending && !stream_last_inflight && !busy && !mem_busy;
@@ -173,7 +176,8 @@ module nockpu_axi_lite #(
     .edit_error (edit_error),
     .hint (hint),
     .hint_tag (hint_tag),
-    .free_ptr (free_ptr)
+    .free_ptr (free_ptr),
+    .root_ptr (root_ptr)
   );
   assign core_done = done;
 
@@ -328,6 +332,9 @@ module nockpu_axi_lite #(
           end
           REG_FREE_PTR_W: begin
             s_axi_rdata <= {{(32-`memory_addr_width){1'b0}}, free_ptr};
+          end
+          REG_ROOT_PTR_W: begin
+            s_axi_rdata <= {{(32-`memory_addr_width){1'b0}}, root_ptr};
           end
           REG_STREAM_STATUS_W: begin
             s_axi_rdata <= {28'b0, stream_error, stream_done, stream_pending, stream_active};

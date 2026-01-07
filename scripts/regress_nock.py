@@ -66,7 +66,11 @@ def parse_mem_file(path):
             try:
                 value = int(parts[-1], 16)
             except ValueError:
-                continue
+                token = parts[-1].lower()
+                if token and set(token) <= {"x", "z"}:
+                    value = 0
+                else:
+                    continue
             words.append(value & WORD_MASK)
     return words
 
@@ -308,6 +312,10 @@ SMOKE_ONLY = {
     "memory/decrement.hex",
     "memory/cap.hex",
 }
+HINT_EXPECTATIONS = {
+    "memory/opcode11_static.hex": (267062763, 1),
+    "memory/opcode11_dynamic.hex": (420, 1),
+}
 
 
 def compile_sim(vvp_path):
@@ -343,20 +351,40 @@ def parse_cycles(output):
     return None
 
 
-def run_case(vvp_path, mem_path, dump_path, max_cycles, print_cycles):
+def parse_int(output, label):
+    for line in output.splitlines():
+        if line.startswith(label):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    return int(parts[1])
+                except ValueError:
+                    return None
+    return None
+
+
+def run_case(vvp_path, mem_path, dump_path, max_cycles, print_cycles, force_gc, force_free):
     cmd = ["vvp", vvp_path, f"+mem={mem_path}", f"+dump={dump_path}"]
     if max_cycles:
         cmd.append(f"+max_cycles={max_cycles}")
     if print_cycles:
         cmd.append("+print_cycles")
+    if force_gc:
+        cmd.append("+force_gc")
+    if force_free is not None:
+        cmd.append(f"+force_free={force_free}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(result.stderr or "vvp failed")
     error = parse_error(result.stdout, "error")
     edit_error = parse_error(result.stdout, "edit_error")
     cycles = parse_cycles(result.stdout)
+    root_ptr = parse_int(result.stdout, "root_ptr")
+    gc_seen = parse_int(result.stdout, "gc_seen")
+    hint = parse_int(result.stdout, "hint")
+    hint_tag = parse_int(result.stdout, "hint_tag")
     timed_out = "timeout: traversal_finished not asserted after" in result.stdout
-    return error, edit_error, timed_out, cycles, result.stdout
+    return error, edit_error, timed_out, cycles, root_ptr, gc_seen, hint, hint_tag, result.stdout
 
 
 def main():
@@ -364,6 +392,9 @@ def main():
     parser.add_argument("--tests", nargs="*", default=DEFAULT_TESTS)
     parser.add_argument("--max-cycles", type=int, default=0)
     parser.add_argument("--print-cycles", action="store_true")
+    parser.add_argument("--force-gc", action="store_true")
+    parser.add_argument("--require-gc", action="store_true")
+    parser.add_argument("--force-free", type=int)
     args = parser.parse_args()
 
     sys.setrecursionlimit(10000)
@@ -379,12 +410,14 @@ def main():
                 failures += 1
                 continue
             try:
-                error, edit_error, timed_out, cycles, _ = run_case(
+                error, edit_error, timed_out, cycles, root_ptr, gc_seen, hint, hint_tag, _ = run_case(
                     vvp_path,
                     mem_path,
                     dump_path,
                     args.max_cycles,
                     args.print_cycles,
+                    args.force_gc,
+                    args.force_free,
                 )
             except Exception as exc:
                 print(f"{mem_path}: sim failed ({exc})")
@@ -398,6 +431,20 @@ def main():
                 print(f"{mem_path}: error {error} edit_error {edit_error}")
                 failures += 1
                 continue
+            if args.require_gc and not gc_seen:
+                print(f"{mem_path}: no gc observed")
+                failures += 1
+                continue
+            if mem_path in HINT_EXPECTATIONS:
+                expected_hint, expected_hint_tag = HINT_EXPECTATIONS[mem_path]
+                if hint is None or hint_tag is None:
+                    print(f"{mem_path}: missing hint output")
+                    failures += 1
+                    continue
+                if hint != expected_hint or hint_tag != expected_hint_tag:
+                    print(f"{mem_path}: hint mismatch (hint {hint} tag {hint_tag})")
+                    failures += 1
+                    continue
 
             cycle_note = ""
             if args.print_cycles and cycles is not None:
@@ -413,7 +460,8 @@ def main():
                 subject = root.head
                 formula = root.tail
                 expected = nock_eval(subject, formula)
-                got = decode_mem_root(dump_path, 1)
+                root_addr = root_ptr if root_ptr is not None else 1
+                got = decode_mem_root(dump_path, root_addr)
             except Exception as exc:
                 print(f"{mem_path}: decode/eval failed ({exc})")
                 failures += 1
@@ -423,6 +471,8 @@ def main():
                 print(f"{mem_path}: mismatch")
                 print(f"expected {pretty(expected)}")
                 print(f"got      {pretty(got)}")
+                if root_ptr is not None:
+                    print(f"root_ptr {root_ptr}")
                 failures += 1
             else:
                 if cycle_note:

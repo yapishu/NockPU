@@ -34,8 +34,9 @@ module equal_block #(
 
   reg [`memory_addr_width - 1:0] cmp_stack1 [0:STACK_DEPTH - 1];
   reg [`memory_addr_width - 1:0] cmp_stack2 [0:STACK_DEPTH - 1];
-  reg [`memory_addr_width:0] cmp_stack_ptr;
-  wire [`memory_addr_width:0] cmp_stack_top_idx;
+  localparam integer STACK_PTR_WIDTH = $clog2(STACK_DEPTH + 1);
+  reg [STACK_PTR_WIDTH - 1:0] cmp_stack_ptr;
+  wire [STACK_PTR_WIDTH - 1:0] cmp_stack_top_idx;
   assign cmp_stack_top_idx = cmp_stack_ptr - 1'b1;
 
   reg [`memory_addr_width - 1:0] mem_addr1;

@@ -42,6 +42,7 @@ reg traversal_execute;
 wire traversal_finished;
 
 reg [`memory_addr_width - 1:0] start_addr;
+wire [`memory_addr_width - 1:0] root_addr;
 wire [7:0] error;
 wire module_finished;
 wire [3:0] execute_return_sys_func;
@@ -78,6 +79,7 @@ mem_traversal traversal(.power (power),
                         .clk (clk),
                         .rst (reset),
                         .start_addr (start_addr),
+                        .root_addr (root_addr),
                         .execute (traversal_execute),
                         .gc (gc),
                         .gc_ready (gc_ready),

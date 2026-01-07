@@ -20,6 +20,7 @@ localparam [AXI_ADDR_WIDTH-1:0] REG_MEM_RDATA_HI = 12'h024;
 localparam [AXI_ADDR_WIDTH-1:0] REG_STREAM_CTRL  = 12'h02C;
 localparam [AXI_ADDR_WIDTH-1:0] REG_STREAM_STATUS = 12'h030;
 localparam [AXI_ADDR_WIDTH-1:0] REG_FREE_PTR     = 12'h034;
+localparam [AXI_ADDR_WIDTH-1:0] REG_ROOT_PTR     = 12'h038;
 
 reg clk;
 reg rst;
@@ -351,6 +352,12 @@ initial begin
   end while (!status[1] && cycles < MAX_CYCLES);
   if (!status[1]) begin
     $display("FAIL done timeout");
+    $finish;
+  end
+
+  axi_read(REG_ROOT_PTR, lo);
+  if (lo[`memory_addr_width - 1:0] !== 1) begin
+    $display("FAIL root_ptr expected 1 got %0d", lo[`memory_addr_width - 1:0]);
     $finish;
   end
 

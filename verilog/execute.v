@@ -2482,7 +2482,11 @@ module execute (
 
             EXE_HINT_READ2: begin
               if (mem_ready) begin
-                if(read_data1[`hed_tag] == `ATOM) begin //if static hint
+                read_data_reg <= read_data1;
+                d <= read_data1[`tel_start:`tel_end];
+                d_tag <= read_data1[`tel_tag];
+                b_addr <= read_data1[`hed_start:`hed_end];
+                if (read_data1[`hed_tag] == `ATOM) begin // static hint
                   mem_func <= `SET_CONTENTS;
                   address1 <= execute_address;
                   write_data <= { 6'b100000,
@@ -2497,8 +2501,6 @@ module execute (
                 end else begin
                   mem_func <= `GET_CONTENTS;
                   address1 <= read_data1[`hed_start:`hed_end];
-                  d <= read_data1[`tel_start:`tel_end];
-                  d_tag <= read_data1[`tel_tag];
                   mem_execute <= 1;
                   state <= EXE_HINT_READ3;
                 end
@@ -2510,14 +2512,30 @@ module execute (
 
             EXE_HINT_READ3: begin
               if (mem_ready) begin
-                hint <= read_data1[`hed_start:`hed_end];
-                hint_tag <= read_data1[`hed_tag];
-                c <= read_data1[`tel_start:`tel_end];
-                c_tag <= read_data1[`tel_tag];
-                mem_func <= `GET_FREE;
-                mem_execute <= 1;
-                write_data <= 4;
-                state <= EXE_HINT_WRITE;
+                if (read_data1[`large_atom_bit]
+                && read_data1[`hed_tag] == `CELL
+                && read_data1[`tel_tag] == `ATOM) begin
+                  hint <= b_addr;
+                  hint_tag <= `CELL;
+                  mem_func <= `SET_CONTENTS;
+                  address1 <= execute_address;
+                  write_data <= { 6'b100000,
+                                  execute_data[`hed_tag],
+                                  d_tag,
+                                  execute_data[`hed_start:`hed_end],
+                                  d};
+                  state <= EXE_HINT_DONE;
+                  mem_execute <= 1;
+                end else begin
+                  hint <= read_data1[`hed_start:`hed_end];
+                  hint_tag <= read_data1[`hed_tag];
+                  c <= read_data1[`tel_start:`tel_end];
+                  c_tag <= read_data1[`tel_tag];
+                  mem_func <= `GET_FREE;
+                  mem_execute <= 1;
+                  write_data <= 4;
+                  state <= EXE_HINT_WRITE;
+                end
               end else begin
                 mem_func <= 0;
                 mem_execute <= 0;

@@ -30,6 +30,10 @@ You can run the Nock opcode regression suite (simulation + reference evaluator) 
 
 `python3 scripts/regress_nock.py`
 
+To exercise GC relocation paths for a specific program, you can force GC and require it:
+
+`python3 scripts/regress_nock.py --tests memory/increment.hex --force-gc --require-gc`
+
 This uses the `execute_tb` testbench with `+mem=...` and `+dump=...` plusargs, and checks output nouns against a software Nock evaluator.
 
 ## Core Top-Level (nockpu_top)
@@ -41,6 +45,7 @@ This uses the `execute_tb` testbench with `+mem=...` and `+dump=...` plusargs, a
 - `host_req/host_we/host_addr/host_wdata` issue a single read or write when `host_ready` is high.
 - `host_rvalid/host_rdata` return read data after a host read completes.
 - `hint/hint_tag` mirror op11 hints from the execute module (no valid strobe; last hint is retained).
+- `root_ptr` exposes the current root address (useful after GC relocates the root).
 - When loading a fresh memory image, toggle `rst` after writes so the memory unit reloads `free_mem` from address 0 before `start`.
 
 To run the host-interface smoke test:
@@ -70,10 +75,12 @@ Register map (byte offsets):
 - `0x2C` STREAM_CTRL: bit0 `start` (use MEM_ADDR as base), bit1 `abort`
 - `0x30` STREAM_STATUS: bit0 `active`, bit1 `pending`, bit2 `done`, bit3 `error` (write any value to clear done/error)
 - `0x34` FREE_PTR: free memory pointer (read-only)
+- `0x38` ROOT_PTR: current root pointer (read-only, updated after GC)
 
 Streaming writes sequential 64-bit words starting at `MEM_ADDR`. Assert `STREAM_CTRL.start`, then drive `s_axis_tdata` with `s_axis_tvalid` until `s_axis_tlast` marks the final word. The core start is gated while a stream is active; `s_axis_tready` deasserts while a write is in flight.
 `AXI_ADDR_WIDTH` defaults to 12 to cover the full register map.
 `FREE_PTR` mirrors the allocator head and is most useful while the core is idle.
+`ROOT_PTR` tracks the active root address; if GC runs during evaluation, read results from `ROOT_PTR` instead of assuming address 1.
 
 To run the AXI-lite smoke test:
 

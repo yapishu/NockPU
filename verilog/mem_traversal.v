@@ -9,6 +9,7 @@ module mem_traversal #(
 )(
   input power, clk, rst,
   input [`memory_addr_width - 1:0] start_addr,
+  output reg [`memory_addr_width - 1:0] root_addr,
   input execute,
   output wire finished,
   input mem_ready,
@@ -36,8 +37,9 @@ module mem_traversal #(
 
   reg [`memory_addr_width - 1:0] trav_stack_addr [0:STACK_DEPTH - 1];
   reg [1:0] trav_stack_state [0:STACK_DEPTH - 1];
-  reg [`memory_addr_width:0] trav_stack_ptr;
-  wire [`memory_addr_width:0] trav_stack_top_idx;
+  localparam integer STACK_PTR_WIDTH = $clog2(STACK_DEPTH + 1);
+  reg [STACK_PTR_WIDTH - 1:0] trav_stack_ptr;
+  wire [STACK_PTR_WIDTH - 1:0] trav_stack_top_idx;
   assign trav_stack_top_idx = trav_stack_ptr - 1'b1;
 
   localparam TRAV_ENTER     = 2'b00,
@@ -54,6 +56,7 @@ module mem_traversal #(
   assign mem_ready_edge = mem_ready && !mem_ready_prev;
 
   reg exec_pop_pending;
+  reg module_done_pending;
   reg [2:0] active_module;
 
   reg [3:0] state;
@@ -99,6 +102,7 @@ module mem_traversal #(
       module_data <= 0;
       mux_controller <= `MUX_TRAVERSAL;
       mem_addr <= 0;
+      root_addr <= 0;
       mem_data <= 0;
       mem_tag <= 0;
       hed <= 0;
@@ -107,6 +111,7 @@ module mem_traversal #(
       trav_stack_ptr <= 0;
       in_stack <= {MEM_DEPTH{1'b0}};
       exec_pop_pending <= 1'b0;
+      module_done_pending <= 1'b0;
       active_module <= `MUX_TRAVERSAL;
       state <= STATE_IDLE;
     end else if (execute) begin
@@ -117,6 +122,7 @@ module mem_traversal #(
           mux_controller <= `MUX_TRAVERSAL;
           gc_ready <= 1'b0;
           exec_pop_pending <= 1'b0;
+          module_done_pending <= 1'b0;
           active_module <= `MUX_TRAVERSAL;
           mem_execute <= 1'b0;
           mem_func <= 0;
@@ -126,6 +132,7 @@ module mem_traversal #(
             state <= STATE_GC_WAIT;
           end else if (trav_stack_ptr == 0) begin
             if (mem_ready) begin
+              root_addr <= start_addr;
               trav_stack_addr[0] <= start_addr;
               trav_stack_state[0] <= TRAV_ENTER;
               trav_stack_ptr <= 1;
@@ -147,7 +154,7 @@ module mem_traversal #(
         STATE_READ: begin
           if (trav_stack_ptr == 0) begin
             is_finished_reg <= 1'b0;
-            address1 <= start_addr;
+            address1 <= root_addr;
             address2 <= 0;
             if (mem_ready) begin
               mem_func <= `GET_CONTENTS;
@@ -199,7 +206,7 @@ module mem_traversal #(
             state <= STATE_GC_WAIT;
           end else if (trav_stack_ptr == 0) begin
             is_finished_reg <= 1'b0;
-            address1 <= start_addr;
+            address1 <= root_addr;
             address2 <= 0;
             if (mem_ready) begin
               mem_func <= `GET_CONTENTS;
@@ -212,7 +219,7 @@ module mem_traversal #(
           end else if (is_large_atom) begin
             if (trav_stack_ptr == 1) begin
               is_finished_reg <= 1'b0;
-              address1 <= start_addr;
+              address1 <= root_addr;
               address2 <= 0;
               if (mem_ready) begin
                 mem_func <= `GET_CONTENTS;
@@ -339,7 +346,7 @@ module mem_traversal #(
                     state <= STATE_EXEC_WAIT;
                   end else if (trav_stack_ptr == 1) begin
                     is_finished_reg <= 1'b0;
-                    address1 <= start_addr;
+                    address1 <= root_addr;
                     address2 <= 0;
                     if (mem_ready) begin
                       mem_func <= `GET_CONTENTS;
@@ -387,7 +394,7 @@ module mem_traversal #(
                 end else begin
                   if (trav_stack_ptr == 1) begin
                     is_finished_reg <= 1'b0;
-                    address1 <= start_addr;
+                    address1 <= root_addr;
                     address2 <= 0;
                     if (mem_ready) begin
                       mem_func <= `GET_CONTENTS;
@@ -452,7 +459,7 @@ module mem_traversal #(
                 end else begin
                   if (trav_stack_ptr == 1) begin
                     is_finished_reg <= 1'b0;
-                    address1 <= start_addr;
+                    address1 <= root_addr;
                     address2 <= 0;
                     if (mem_ready) begin
                       mem_func <= `GET_CONTENTS;
@@ -479,37 +486,56 @@ module mem_traversal #(
         end
 
         STATE_EXEC_WAIT: begin
-          if (module_finished) begin
-            if (active_module == `MUX_EXECUTE
-            && execute_return_sys_func == `SYS_FUNC_EXECUTE
-            && execute_return_state == `SYS_EXECUTE_ERROR) begin
-              is_finished_reg <= 1'b1;
-              state <= STATE_IDLE;
-              mux_controller <= `MUX_TRAVERSAL;
-              exec_pop_pending <= 1'b0;
-              active_module <= `MUX_TRAVERSAL;
-            end else if (trav_stack_ptr == 0) begin
-              mux_controller <= `MUX_TRAVERSAL;
-              exec_pop_pending <= 1'b0;
-              active_module <= `MUX_TRAVERSAL;
-              is_finished_reg <= 1'b0;
-              address1 <= start_addr;
-              address2 <= 0;
-              if (mem_ready) begin
-                mem_func <= `GET_CONTENTS;
-                mem_execute <= 1'b1;
-                state <= STATE_FINISH_WAIT;
+          if (gc) begin
+            trav_stack_ptr <= 0;
+            in_stack <= {MEM_DEPTH{1'b0}};
+            exec_pop_pending <= 1'b0;
+            module_done_pending <= 1'b0;
+            gc_ready <= 1'b1;
+            mem_execute <= 1'b0;
+            mem_func <= 0;
+            mux_controller <= `MUX_TRAVERSAL;
+            active_module <= `MUX_TRAVERSAL;
+            state <= STATE_GC_WAIT;
+          end else begin
+            if (module_finished) begin
+              module_done_pending <= 1'b1;
+            end
+            if (module_finished || module_done_pending) begin
+              if (active_module == `MUX_EXECUTE
+              && execute_return_sys_func == `SYS_FUNC_EXECUTE
+              && execute_return_state == `SYS_EXECUTE_ERROR) begin
+                is_finished_reg <= 1'b1;
+                state <= STATE_IDLE;
+                mux_controller <= `MUX_TRAVERSAL;
+                exec_pop_pending <= 1'b0;
+                module_done_pending <= 1'b0;
+                active_module <= `MUX_TRAVERSAL;
+              end else if (trav_stack_ptr == 0) begin
+                mux_controller <= `MUX_TRAVERSAL;
+                exec_pop_pending <= 1'b0;
+                active_module <= `MUX_TRAVERSAL;
+                is_finished_reg <= 1'b0;
+                address1 <= root_addr;
+                address2 <= 0;
+                if (mem_ready) begin
+                  mem_func <= `GET_CONTENTS;
+                  mem_execute <= 1'b1;
+                  state <= STATE_FINISH_WAIT;
+                  module_done_pending <= 1'b0;
+                end else begin
+                  mem_execute <= 1'b0;
+                  mem_func <= 0;
+                end
               end else begin
-                mem_execute <= 1'b0;
-                mem_func <= 0;
+                mux_controller <= `MUX_TRAVERSAL;
+                exec_pop_pending <= 1'b0;
+                active_module <= `MUX_TRAVERSAL;
+                trav_stack_state[trav_stack_top_idx] <= TRAV_ENTER;
+                mem_addr <= trav_stack_addr[trav_stack_top_idx];
+                state <= STATE_READ;
+                module_done_pending <= 1'b0;
               end
-            end else begin
-              mux_controller <= `MUX_TRAVERSAL;
-              exec_pop_pending <= 1'b0;
-              active_module <= `MUX_TRAVERSAL;
-              trav_stack_state[trav_stack_top_idx] <= TRAV_ENTER;
-              mem_addr <= trav_stack_addr[trav_stack_top_idx];
-              state <= STATE_READ;
             end
           end
         end
@@ -519,7 +545,9 @@ module mem_traversal #(
             if (mem_ready) begin
               gc_ready <= 1'b0;
               trav_stack_ptr <= 0;
+              module_done_pending <= 1'b0;
               if (read_data1[`memory_addr_width - 1:0] != `NIL_ADDR) begin
+                root_addr <= read_data1[`memory_addr_width - 1:0];
                 trav_stack_addr[0] <= read_data1[`memory_addr_width - 1:0];
                 trav_stack_state[0] <= TRAV_ENTER;
                 trav_stack_ptr <= 1;
@@ -533,7 +561,7 @@ module mem_traversal #(
                 state <= STATE_WAIT;
               end else begin
                 is_finished_reg <= 1'b0;
-                address1 <= start_addr;
+                address1 <= root_addr;
                 address2 <= 0;
                 mem_func <= `GET_CONTENTS;
                 mem_execute <= 1'b1;
@@ -552,7 +580,7 @@ module mem_traversal #(
             mem_func <= 0;
 `ifdef TRACE_FINISH
             $display("finish check addr %0d data %h exec %0d stack %0d",
-                     start_addr,
+                     root_addr,
                      read_data1,
                      read_data1[`execute_bit],
                      read_data1[`stack_bit]);
@@ -561,10 +589,10 @@ module mem_traversal #(
               is_finished_reg <= 1'b0;
               trav_stack_ptr <= 1;
               in_stack <= {MEM_DEPTH{1'b0}};
-              in_stack[start_addr] <= 1'b1;
-              trav_stack_addr[0] <= start_addr;
+              in_stack[root_addr] <= 1'b1;
+              trav_stack_addr[0] <= root_addr;
               trav_stack_state[0] <= TRAV_ENTER;
-              mem_addr <= start_addr;
+              mem_addr <= root_addr;
               mem_data <= read_data1;
               mem_tag <= read_data1[`tag_start:`tag_end];
               hed <= read_data1[`hed_start:`hed_end];
@@ -594,6 +622,7 @@ module mem_traversal #(
       trav_stack_ptr <= 0;
       in_stack <= {MEM_DEPTH{1'b0}};
       exec_pop_pending <= 1'b0;
+      module_done_pending <= 1'b0;
       active_module <= `MUX_TRAVERSAL;
     end
   end

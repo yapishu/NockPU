@@ -31,7 +31,8 @@ module nockpu_top #(
   output [7:0] edit_error,
   output [`noun_width-1:0] hint,
   output hint_tag,
-  output [`memory_addr_width - 1:0] free_ptr
+  output [`memory_addr_width - 1:0] free_ptr,
+  output [`memory_addr_width - 1:0] root_ptr
 );
   wire power = 1'b1;
 
@@ -328,6 +329,7 @@ module nockpu_top #(
     .clk (clk),
     .rst (rst),
     .start_addr (start_addr_reg),
+    .root_addr (root_ptr),
     .execute (running),
     .gc (gc),
     .gc_ready (gc_ready),

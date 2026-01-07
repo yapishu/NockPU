@@ -74,11 +74,13 @@ reg traversal_execute;
 wire traversal_finished;
 
 reg [`memory_addr_width - 1:0] start_addr;
+wire [`memory_addr_width - 1:0] root_addr;
 
 //GC signals
 
 wire gc; // wire from MMU to MTU signaling a GC
 wire gc_ready; // wire from MTU to MMU signaling MTU is ready for GC 
+reg gc_seen;
 
 //Signal from Control Mux to MTU 
 wire [`memory_addr_width - 1:0] module_address;
@@ -269,6 +271,7 @@ mem_traversal traversal(.power (power),
                         .clk (clk),
                         .rst (reset),
                         .start_addr (start_addr),
+                        .root_addr (root_addr),
                         .execute (traversal_execute),
                         .gc (gc),
                         .gc_ready (gc_ready),
@@ -502,15 +505,31 @@ integer idx;
 localparam integer MEM_DEPTH = 1 << `memory_addr_width;
 localparam integer MEM_LAST = MEM_DEPTH - 1;
 localparam integer SPACE_BASE = 1 << (`memory_addr_width - 1);
+localparam integer MEMORY_MASK = 1 << (`memory_addr_width - 1);
+localparam integer FORCE_FREE_DEFAULT = MEMORY_MASK - 1;
 reg [8*256-1:0] mem_init_file;
 reg [8*256-1:0] dump_mem_file;
 integer max_cycles;
+integer force_free_value;
+reg force_free_valid;
+reg force_gc;
+
+always @(posedge clk or negedge reset) begin
+  if (!reset) begin
+    gc_seen <= 1'b0;
+  end else if (gc) begin
+    gc_seen <= 1'b1;
+  end
+end
 
 // Perform Test
 initial begin
   mem_init_file = MEM_INIT_FILE;
   dump_mem_file = DUMP_MEM_FILE;
   max_cycles = MAX_CYCLES;
+  force_free_value = 0;
+  force_free_valid = 1'b0;
+  force_gc = 1'b0;
   if ($value$plusargs("mem=%s", mem_init_file)) begin
   end
   if ($value$plusargs("dump=%s", dump_mem_file)) begin
@@ -528,6 +547,20 @@ initial begin
 
   if (mem_init_file != "") begin
     $readmemh(mem_init_file, mem.ram.ram, 0, MEM_LAST);
+  end
+  if ($value$plusargs("force_free=%d", force_free_value)) begin
+    force_free_valid = 1'b1;
+  end
+  if ($test$plusargs("force_gc")) begin
+    force_gc = 1'b1;
+  end
+  if (!force_free_valid && force_gc) begin
+    force_free_value = FORCE_FREE_DEFAULT;
+    force_free_valid = 1'b1;
+  end
+  if (force_free_valid) begin
+    mem.ram.ram[0] = {`memory_data_width{1'b0}};
+    mem.ram.ram[0][`memory_addr_width - 1:0] = force_free_value[`memory_addr_width - 1:0];
   end
 `ifndef NO_VCD
   $dumpfile("waveform.vcd");
@@ -583,6 +616,10 @@ initial begin
   $display("ram[%0d] %x", SPACE_BASE + 1, mem.ram.ram[SPACE_BASE + 1]);
   $display("error %x", error);
   $display("edit_error %x", edit_error);
+  $display("hint %0d", hint);
+  $display("hint_tag %0d", hint_tag);
+  $display("root_ptr %0d", root_addr);
+  $display("gc_seen %0d", gc_seen);
   if (dump_mem_file != "") begin
     $writememh(dump_mem_file, mem.ram.ram, 0, MEM_LAST);
   end

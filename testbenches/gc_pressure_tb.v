@@ -1,10 +1,10 @@
 `timescale 1ns/1ns
 `include "../verilog/memory_unit.vh"
 
-module nockpu_top_tb();
+module gc_pressure_tb();
 
-parameter MEM_INIT_FILE = "./memory/constant_tb.hex";
-parameter integer MAX_CYCLES = 1000000;
+parameter MEM_INIT_FILE = "./memory/increment.hex";
+parameter integer MAX_CYCLES = 200000;
 
 reg clk;
 reg rst;
@@ -58,15 +58,9 @@ task host_read;
   output [`memory_data_width - 1:0] data;
   integer wait_cycles;
   begin
-`ifdef TRACE_HOST
-    $display("host_read start addr %0d", addr);
-`endif
     host_addr = addr;
     host_we = 1'b0;
     host_req = 1'b1;
-`ifdef TRACE_HOST
-    $display("host_req asserted time %0t ready %0d", $time, host_ready);
-`endif
     wait_cycles = 0;
     while (!host_ready && wait_cycles < MAX_CYCLES) begin
       @(posedge clk);
@@ -89,18 +83,34 @@ task host_read;
       $finish;
     end
     data = host_rdata;
-`ifdef TRACE_HOST
-    $display("host_read done addr %0d data %h", addr, data);
-`endif
   end
 endtask
 
-reg [`memory_data_width - 1:0] read_word;
-reg [8*256-1:0] mem_init_file;
-integer cycle_count;
-integer wait_cycles;
 localparam integer MEM_DEPTH = 1 << `memory_addr_width;
 localparam integer MEM_LAST = MEM_DEPTH - 1;
+localparam integer MEMORY_MASK = 1 << (`memory_addr_width - 1);
+localparam [`memory_addr_width - 1:0] FORCE_FREE = MEMORY_MASK - 1;
+localparam [`memory_data_width - 1:0] EXPECTED_ROOT = 64'h030000097fffffff;
+
+reg [8*256-1:0] mem_init_file;
+reg [`memory_data_width - 1:0] read_word;
+integer wait_cycles;
+reg gc_seen;
+reg busy_seen;
+
+always @(posedge clk or negedge rst) begin
+  if (!rst) begin
+    gc_seen <= 1'b0;
+    busy_seen <= 1'b0;
+  end else if (dut.mem.gc) begin
+    gc_seen <= 1'b1;
+    if (busy) begin
+      busy_seen <= 1'b1;
+    end
+  end else if (busy) begin
+    busy_seen <= 1'b1;
+  end
+end
 
 initial begin
   mem_init_file = MEM_INIT_FILE;
@@ -110,6 +120,9 @@ initial begin
     $readmemh(mem_init_file, dut.mem.ram.ram, 0, MEM_LAST);
   end
 
+  dut.mem.ram.ram[0] = {`memory_data_width{1'b0}};
+  dut.mem.ram.ram[0][`memory_addr_width - 1:0] = FORCE_FREE;
+
   start_addr = 1;
   start = 1'b0;
   host_req = 1'b0;
@@ -117,20 +130,27 @@ initial begin
   host_addr = 0;
   host_wdata = 0;
 
-  cycle_count = 0;
   rst = 1'b0;
   repeat (2) @(posedge clk);
   rst = 1'b1;
 
   wait (host_ready);
-  host_read(1, read_word);
-`ifdef TRACE_HOST
-  $display("initial ram[1] %h", read_word);
-`endif
-
   start = 1'b1;
   @(posedge clk);
+  @(negedge clk);
   start = 1'b0;
+
+  wait_cycles = 0;
+  while (!busy && wait_cycles < MAX_CYCLES) begin
+    @(posedge clk);
+    wait_cycles = wait_cycles + 1;
+  end
+  if (!busy) begin
+    $display("FAIL busy timeout");
+    $display("debug: start %0d host_busy %0d running %0d host_ready %0d mem_ready %0d busy_seen %0d", start, dut.host_busy, dut.running, host_ready, dut.mem_ready, busy_seen);
+    $finish;
+  end
+
   wait_cycles = 0;
   while (!done && wait_cycles < MAX_CYCLES) begin
     @(posedge clk);
@@ -138,61 +158,38 @@ initial begin
   end
   if (!done) begin
     $display("FAIL done timeout");
+    $display("debug: sel %0d trav_state %0d exec_func %0d exec_state %0d mem_state %0d mem_gc_state %0d mem_ready %0d mem_execute %0d mem_func %0d gc %0d gc_ready %0d gc_seen %0d",
+             dut.select,
+             dut.traversal.state,
+             dut.execute.exec_func,
+             dut.execute.state,
+             dut.mem.state,
+             dut.mem.gc_state,
+             dut.mem_ready,
+             dut.mem_execute,
+             dut.mem_func,
+             dut.gc,
+             dut.traversal.gc_ready,
+             gc_seen);
+    $finish;
+  end
+  if (!gc_seen) begin
+    $display("FAIL gc not observed");
+    $finish;
+  end
+  if (error !== 8'h00 || edit_error !== 8'h00) begin
+    $display("FAIL error %h edit_error %h", error, edit_error);
     $finish;
   end
 
-  host_read(1, read_word);
-  if (read_word !== 64'h0300000a400000ae) begin
-    $display("FAIL expected 0300000a400000ae got %h", read_word);
+  host_read(root_ptr, read_word);
+  if (read_word !== EXPECTED_ROOT) begin
+    $display("FAIL expected %h got %h root_ptr %0d", EXPECTED_ROOT, read_word, root_ptr);
     $finish;
   end
+
   $display("PASS");
   $finish;
 end
-
-always @(posedge clk) begin
-  if (rst) begin
-    cycle_count <= cycle_count + 1;
-  end else begin
-    cycle_count <= 0;
-  end
-end
-
-`ifdef TRACE_HOST
-reg host_ready_prev;
-reg host_busy_prev;
-reg host_rvalid_prev;
-always @(host_req) begin
-  $display("time %0t host_req %0d", $time, host_req);
-end
-always @(posedge clk) begin
-  if (!rst) begin
-    host_ready_prev <= 1'b0;
-    host_busy_prev <= 1'b0;
-    host_rvalid_prev <= 1'b0;
-  end else begin
-    if (host_ready != host_ready_prev
-        || dut.host_busy != host_busy_prev
-        || host_rvalid != host_rvalid_prev
-        || host_req
-        || host_we
-        || start) begin
-      $display("cycle %0d ready %0d req %0d we %0d exec %0d busy %0d mem_ready %0d rvalid %0d done %0d",
-               cycle_count,
-               host_ready,
-               host_req,
-               host_we,
-               dut.host_exec,
-               dut.host_busy,
-               dut.mem_ready,
-               host_rvalid,
-               done);
-    end
-    host_ready_prev <= host_ready;
-    host_busy_prev <= dut.host_busy;
-    host_rvalid_prev <= host_rvalid;
-  end
-end
-`endif
 
 endmodule

@@ -21,9 +21,10 @@ module NPU_UI(CLOCK_50);
   wire done;
   wire [7:0] error;
   wire [7:0] edit_error;
-  wire [`noun_width-1:0] hint;
-  wire hint_tag;
-  wire [`memory_addr_width - 1:0] free_ptr;
+wire [`noun_width-1:0] hint;
+wire hint_tag;
+wire [`memory_addr_width - 1:0] free_ptr;
+wire [`memory_addr_width - 1:0] root_ptr;
 
   wire host_req;
   wire host_we;
@@ -52,7 +53,8 @@ module NPU_UI(CLOCK_50);
     .edit_error (edit_error),
     .hint (hint),
     .hint_tag (hint_tag),
-    .free_ptr (free_ptr)
+    .free_ptr (free_ptr),
+    .root_ptr (root_ptr)
   );
 
   localparam integer MEM_DEPTH = 1 << `memory_addr_width;
