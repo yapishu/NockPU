@@ -50,12 +50,14 @@ and includes uncommitted changes present when this file was written.
 
 - `verilog/memory_unit.vh`: `memory_addr_width` is now overrideable and `NIL_ADDR`
   / `ADDR_PAD` derive from it. Why: correct packing and scalable memory depth.
-- `verilog/ram.v`: RAM depth derived from `memory_addr_width`. Why: correct sizing
-  when the address width changes and for DE10 inference.
-- `verilog/memory_unit.v`: allocator/GC fixes (free pointer updates, `free_addr` set
-  after GC, corrected max-memory mask, reset defaults, optional TRACE logging, and
-  removed hard `$stop`). Added `free_ptr` output. Why: robust resource management
-  and observable allocator state.
+- `verilog/ram.v`: RAM depth derived from `memory_addr_width` and now uses a
+  `req/ready` handshake to gate accesses (optional `TRACE_RAM` debug). Why:
+  correct sizing plus a clean hook for variable-latency memory.
+- `verilog/memory_unit.v`: allocator/GC fixes (free pointer updates, `free_addr`
+  set after GC, corrected max-memory mask, reset defaults, optional TRACE logging,
+  and removed hard `$stop`). Added `free_ptr` output and a RAM `req/ready` handshake
+  so reads/writes/GC wait on `ram_ready`. Why: robust resource management and a
+  latency-tolerant memory interface for SDRAM.
 - `verilog/mem_traversal.v`: explicit traversal stack with `STACK_DEPTH` parameter,
   `in_stack` guard, mem-ready edge handling, GC restart path, and `root_addr` output.
   Error propagation covers all modules. Why: deterministic traversal and GC safety.
@@ -105,7 +107,8 @@ and includes uncommitted changes present when this file was written.
   timeout-based completion. Why: keep traversal tests aligned with the new core.
 - `testbenches/mem_traversal_stackless_tb.v`: new stackless traversal smoke test.
 - `testbenches/memory_unit_tb.v`: updated for dual-port memory, `free_ptr`, `gc_ready`,
-  and read/write verification. Why: validate allocator and memory API behavior.
+  and read/write verification; `mem_request` timing avoids execute sampling races
+  and optional debug prints were added. Why: validate allocator and memory API behavior.
 - `testbenches/nockpu_top_tb.v`: new host-interface smoke test. Why: verify core
   integration and host memory access.
 - `testbenches/nockpu_de10_uart_tb.v`: UART loader smoke test that writes memory,

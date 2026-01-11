@@ -42,6 +42,8 @@ module memory_unit(
   reg [`memory_addr_width - 1:0] mem_addr2;
   reg mem_write;
   reg [`memory_data_width - 1:0] mem_data_in;
+  reg mem_req;
+  wire ram_ready;
 
   //Garbage Collection Registers
   reg [`memory_addr_width - 1:0] old_root;
@@ -110,6 +112,8 @@ module memory_unit(
           .clock (clk),
           .data (mem_data_in),
           .wren (mem_write),
+          .req (mem_req),
+          .ready (ram_ready),
           .q1 (mem_data_out1),
           .q2 (mem_data_out2));
 
@@ -123,6 +127,7 @@ module memory_unit(
     mem_addr2 <= 0;
     mem_data_in <= 0;
     mem_write <= 0;
+    mem_req <= 0;
 
     is_ready_reg <= 0;
     max_memory <= memory_mask - 2'd2;
@@ -143,8 +148,12 @@ module memory_unit(
     gc_n <= free_mem;
     gc_k <= old_root;
     mem_addr1 <= old_root;
+    mem_req <= 1'b0;
+    mem_write <= 1'b0;
   end
   else if (power) begin
+    mem_req <= 1'b0;
+    mem_write <= 1'b0;
 `ifdef TRACE_GC
     if (gc && !gc_prev) begin
       $display("gc asserted free_mem %0d old_root %0d new_root %0d", free_mem, old_root, new_root);
@@ -157,9 +166,14 @@ module memory_unit(
       state <= STATE_INIT_WAIT_0;
       mem_addr1 <= 0;
       mem_addr2 <= 0;
+      mem_req <= 1'b1;
     end
     STATE_INIT_WAIT_0: begin
-      state <= STATE_INIT_STORE_FREE_MEM;
+      if (ram_ready) begin
+        state <= STATE_INIT_STORE_FREE_MEM;
+      end else begin
+        state <= STATE_INIT_WAIT_0;
+      end
     end
     // Record the start of the free memory store
     STATE_INIT_STORE_FREE_MEM: begin
@@ -189,6 +203,7 @@ module memory_unit(
         `GET_CONTENTS: begin
           mem_addr1 <= address1;
           mem_addr2 <= address2;
+          mem_req <= 1'b1;
           state <= STATE_READ_WAIT_0;
         end
 
@@ -196,6 +211,7 @@ module memory_unit(
           mem_addr1 <= address1;
           mem_data_in <= write_data;
           mem_write<=1;
+          mem_req <= 1'b1;
           state <= STATE_WRITE_WAIT_0;
         end
 
@@ -230,7 +246,14 @@ module memory_unit(
 
     // Various wait states used when reading from memory
     STATE_READ_WAIT_0: begin
-      state <= STATE_READ_FINISH;
+      if (ram_ready) begin
+        state <= STATE_WAIT;
+        is_ready_reg <= 1;
+        read_data1 <= mem_data_out1;
+        read_data2 <= mem_data_out2;
+      end else begin
+        state <= STATE_READ_WAIT_0;
+      end
     end
 
     STATE_READ_FINISH: begin
@@ -242,8 +265,12 @@ module memory_unit(
     
     // Various wait states used when writing to memory
     STATE_WRITE_WAIT_0: begin
-      state <= STATE_WRITE_FINISH;
-      mem_write<=0;
+      if (ram_ready) begin
+        state <= STATE_WAIT;
+        is_ready_reg <= 1;
+      end else begin
+        state <= STATE_WRITE_WAIT_0;
+      end
     end
 
     STATE_WRITE_FINISH: begin
@@ -290,6 +317,7 @@ module memory_unit(
         GC_A1: begin
           //  [Initialize.] x+--h, h*-n, and k*--NIL.
           mem_addr1 <= gc_x;
+          mem_req <= 1'b1;
           gc_state <= GC_WAIT;
           gc_next_state <= GC_A2;
         end
@@ -310,6 +338,7 @@ module memory_unit(
                   gc_n,
                   gc_a[`tel_start:`tel_end]};
           mem_write<=1;
+          mem_req <= 1'b1;
           gc_next_state <= GC_A4;
           gc_state <= GC_WAIT;
         end
@@ -323,6 +352,7 @@ module memory_unit(
               `ADDR_PAD,
               gc_k};
             mem_write<=1;
+            mem_req <= 1'b1;
             gc_k <= gc_x;
             gc_state <= GC_WAIT;
             gc_next_state <= GC_A5;
@@ -340,6 +370,7 @@ module memory_unit(
             gc_a[`hed_start:`hed_end],
             `NIL};
           mem_write<=1;
+          mem_req <= 1'b1;
           gc_state <= GC_WAIT;
           gc_next_state <= GC_A6;
           // prepare for A6
@@ -357,6 +388,7 @@ module memory_unit(
               mem_data_in[`hed_start:`hed_end],
               gc_d[`tel_start:`tel_end]};
             mem_write<=1;
+            mem_req <= 1'b1;
             gc_state <= GC_WAIT;
             gc_next_state <= GC_B0;
             gc_n <= gc_n + 1;
@@ -375,6 +407,7 @@ module memory_unit(
               mem_data_in[`hed_start:`hed_end],
               mem_data_out2[`hed_start:`hed_end]};
             mem_write <= 1;
+            mem_req <= 1'b1;
             gc_state <= GC_WAIT;
             gc_next_state <= GC_B0;
             gc_n <= gc_n + 1;
@@ -388,6 +421,7 @@ module memory_unit(
               `ADDR_PAD,
               gc_n+2'h1};
             mem_write<=1;
+            mem_req <= 1'b1;
             gc_n <= gc_n + 1;
             gc_x <= gc_d[`tel_start:`tel_end];
             
@@ -402,12 +436,15 @@ module memory_unit(
           end
           else begin
             mem_addr1 <= gc_k;
-            gc_state <= GC_B1;
+            mem_req <= 1'b1;
+            gc_state <= GC_WAIT;
+            gc_next_state <= GC_B1;
           end
         end
         
         GC_B1: begin
           mem_addr2 <= mem_data_out1[`hed_start:`hed_end];
+          mem_req <= 1'b1;
           gc_state <= GC_WAIT;
           gc_next_state <= GC_B2;
         end
@@ -416,6 +453,7 @@ module memory_unit(
           mem_addr1 <= mem_data_out1[`hed_start:`hed_end];
           gc_t <= gc_k;
           gc_k <= mem_data_out1[`tel_start:`tel_end];
+          mem_req <= 1'b1;
           gc_state <= GC_WAIT;
           gc_next_state <= GC_B3_READ;
         end
@@ -425,6 +463,7 @@ module memory_unit(
           gc_x <= mem_data_out1[`hed_start:`hed_end];
           mem_addr1 <= mem_data_out1[`hed_start:`hed_end];
           mem_addr2 <= gc_t;//mem_data_out2[`hed_start:`hed_end];
+          mem_req <= 1'b1;
           gc_state <= GC_WAIT;
           gc_next_state <= GC_B3;
         end
@@ -441,6 +480,7 @@ module memory_unit(
             mem_data_in <= mem_data_out1;
 
             mem_write<=1;
+            mem_req <= 1'b1;
             gc_state <= GC_WAIT;
             gc_next_state <= GC_B0;
           end 
@@ -455,6 +495,7 @@ module memory_unit(
               gc_n,
               gc_tmp[`tel_start:`tel_end]};
             mem_write<=1;
+            mem_req <= 1'b1;
             gc_state <= GC_WAIT;
             gc_next_state <= GC_A1;
           end
@@ -481,6 +522,7 @@ module memory_unit(
             mem_addr1 <= gc_k;
             gc_k <= gc_k +1;
             //mem_write <= 1;
+            mem_req <= 1'b1;
             gc_state <= GC_WAIT;
             gc_next_state <= GC_WTF;
           end else begin 
@@ -492,8 +534,11 @@ module memory_unit(
         end
         
         GC_WAIT: begin
-          mem_write<=0;
-          gc_state <= gc_next_state;
+          if (ram_ready) begin
+            gc_state <= gc_next_state;
+          end else begin
+            gc_state <= GC_WAIT;
+          end
             //debug_sig <= 0;
         end
 

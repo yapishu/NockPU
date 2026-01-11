@@ -71,6 +71,14 @@ initial begin
   forever MAX10_CLK1_50 = #10 ~MAX10_CLK1_50;
 end
 
+always @(posedge clk) begin
+  if ($test$plusargs("debug")) begin
+    $display("t=%0t state=%0d exec=%b func=%b mem_req=%b mem_write=%b mem_ready=%b addr1=%0d",
+             $time, mem.state, mem_execute, mem_func, mem.mem_req, mem.mem_write,
+             mem_ready, mem.mem_addr1);
+  end
+end
+
 integer idx;
 
 task mem_request;
@@ -87,7 +95,6 @@ task mem_request;
     @(posedge clk);
     @(posedge clk);
     mem_execute = 1'b0;
-    wait (mem_ready == 1'b0);
     wait (mem_ready == 1'b1);
   end
 endtask
@@ -128,6 +135,9 @@ initial begin
 
   // Write to Free Addr
   mem_request(`SET_CONTENTS, free_addr_reg, 0, MEM_WRITE_DATA);
+  if ($test$plusargs("debug")) begin
+    $display("debug mem[%0d] %h", free_addr_reg, mem.ram.ram[free_addr_reg]);
+  end
   mem_request(`GET_CONTENTS, free_addr_reg, 0, 0);
   if (read_data1 !== MEM_WRITE_DATA) begin
     $display("FAIL mem readback expected %h got %h", MEM_WRITE_DATA, read_data1);
