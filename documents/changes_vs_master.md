@@ -1,8 +1,4 @@
-# Changes vs master (main baseline)
-
-This repository has no `master` branch. This document compares the current `reid`
-worktree to `main` at merge-base commit `105ebf94c5aa7f303c1aa1a670de1735cd944480`
-and includes uncommitted changes present when this file was written.
+# Changes
 
 ## Intent and priorities
 
@@ -155,5 +151,4 @@ and includes uncommitted changes present when this file was written.
 
 ## Notes
 
-- The baseline is `main` at `105ebf94c5aa7f303c1aa1a670de1735cd944480` because
-  there is no `master` branch in this repo.
+- The baseline is `main` at `105ebf94c5aa7f303c1aa1a670de1735cd944480`
