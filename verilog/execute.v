@@ -277,7 +277,7 @@ module execute (
   end
 
   always @(posedge clk or negedge rst) begin
-    if (!rst || (execute_start==`MUX_EXECUTE && !(execute_start_ff==`MUX_EXECUTE))) begin
+    if (!rst) begin
       exec_func <= EXE_FUNC_INIT;
       state <= EXE_INIT_INIT;
       trav_B <= `NIL;
@@ -305,8 +305,37 @@ module execute (
       axis_val <= 0;
       axis_tag <= 0;
       axis_header_reg <= 0;
-    end 
-    else if (execute_start == `MUX_EXECUTE) begin
+      hint <= 0;
+      hint_tag <= 0;
+    end else if (execute_start==`MUX_EXECUTE && !(execute_start_ff==`MUX_EXECUTE)) begin
+      exec_func <= EXE_FUNC_INIT;
+      state <= EXE_INIT_INIT;
+      trav_B <= `NIL;
+      is_finished_reg <= 0;
+      read_data_reg <= 0;
+      execute_return_sys_func <= 0;
+      execute_return_state <= 0;
+      write_data <= 0;
+      mem_execute<=0;
+      debug_sig <= 0;
+      address1 <=0;
+      error <= 0;
+      la_axis_ready <= 0;
+      la_axis_done <= 0;
+      la_axis_scan_mode <= 0;
+      la_axis_len <= 0;
+      la_axis_head_ptr <= 0;
+      la_axis_ptr <= 0;
+      la_axis_target_idx <= 0;
+      la_axis_scan_idx <= 0;
+      la_axis_cur_idx <= 0;
+      la_axis_val <= 0;
+      la_axis_bit <= 0;
+      slot_subject_reg <= 0;
+      axis_val <= 0;
+      axis_tag <= 0;
+      axis_header_reg <= 0;
+    end else if (execute_start == `MUX_EXECUTE) begin
       case (exec_func)
         EXE_FUNC_INIT: begin
           case (state)

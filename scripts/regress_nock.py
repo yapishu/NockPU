@@ -318,8 +318,12 @@ HINT_EXPECTATIONS = {
 }
 
 
-def compile_sim(vvp_path):
-    cmd = ["iverilog", "-DNO_VCD", "-o", vvp_path, "-c", "command_file"]
+def compile_sim(vvp_path, defines=None):
+    cmd = ["iverilog", "-DNO_VCD"]
+    if defines:
+        for define in defines:
+            cmd.append(f"-D{define}")
+    cmd.extend(["-o", vvp_path, "-c", "command_file"])
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         sys.stderr.write(result.stdout)
@@ -395,13 +399,18 @@ def main():
     parser.add_argument("--force-gc", action="store_true")
     parser.add_argument("--require-gc", action="store_true")
     parser.add_argument("--force-free", type=int)
+    parser.add_argument("--stackless", action="store_true",
+                        help="Compile with stackless traversal (NPU_STACKLESS_TRAV=1).")
     args = parser.parse_args()
 
     sys.setrecursionlimit(10000)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         vvp_path = os.path.join(tmpdir, "npu_regress.vvp")
-        compile_sim(vvp_path)
+        defines = ["NPU_STACKLESS_TRAV=1"] if args.stackless else []
+        compile_sim(vvp_path, defines)
+        if args.stackless:
+            print("stackless traversal enabled")
         failures = 0
         for mem_path in args.tests:
             dump_path = os.path.join(tmpdir, "mem_dump.hex")

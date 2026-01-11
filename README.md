@@ -30,6 +30,10 @@ You can run the Nock opcode regression suite (simulation + reference evaluator) 
 
 `python3 scripts/regress_nock.py`
 
+To run the same suite with stackless traversal enabled:
+
+`python3 scripts/regress_nock.py --stackless`
+
 To exercise GC relocation paths for a specific program, you can force GC and require it:
 
 `python3 scripts/regress_nock.py --tests memory/increment.hex --force-gc --require-gc`
@@ -96,13 +100,15 @@ vvp nockpu_axi_lite_tb.vvp +mem=memory/constant_tb.hex
 ## DE10-Lite UART Loader
 
 `verilog/nockpu_de10_uart.v` adds a UART bridge for loading memory images and reading results on the DE10-Lite. See `documents/de10_uart.md` for wiring and protocol details.
+`nockpu_de10_uart` exposes a `USE_STACKLESS_TRAV` parameter (default 1) to switch between stackless and stack-based traversal.
+For a roadmap to use the onboard SDRAM, see `documents/de10_memory_plan.md`.
 
 ## Configuration Knobs
 
 - `memory_addr_width` can be overridden at compile time with `-Dmemory_addr_width=<N>`; memory images must match the new depth.
 - `mem_traversal` and `equal_block` accept a `STACK_DEPTH` parameter. The top-level wrappers expose `STACK_DEPTH_TRAV` and `STACK_DEPTH_EQUAL` parameters (defaults 2048).
 - You can also override the wrapper defaults with `-DNPU_STACK_DEPTH_TRAV=<N>` and `-DNPU_STACK_DEPTH_EQUAL=<N>` at compile time.
-- `USE_STACKLESS_TRAV` selects the pointer-reversal (stackless) traversal (`-DNPU_STACKLESS_TRAV=1`); default is stack-based traversal.
+- `USE_STACKLESS_TRAV` selects the pointer-reversal (stackless) traversal (`-DNPU_STACKLESS_TRAV=1`); `nockpu_top` defaults to stack-based, while `nockpu_de10_uart` defaults to stackless.
 
 # Project Layout
 

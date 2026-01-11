@@ -59,3 +59,9 @@ Notes:
   free pointer from word 0.
 - `--decode` reads back memory and prints the resulting noun using `root_ptr`.
   Adjust `--mem-depth` if you change `memory_addr_width`.
+
+## Configuration
+
+`verilog/nockpu_de10_uart.v` exposes `USE_STACKLESS_TRAV` (default 1) to select
+stackless traversal. Set it to 0 to use the stack-based traversal if you need
+debug parity with the stackful path.

@@ -272,6 +272,33 @@ control_mux control_mux(.sel (select),
                         .edit_data (edit_data)
                       );
 // Instantiate MTU
+`ifdef NPU_STACKLESS_TRAV
+mem_traversal_stackless traversal(.power (power),
+                        .clk (clk),
+                        .rst (reset),
+                        .start_addr (start_addr),
+                        .root_addr (root_addr),
+                        .execute (traversal_execute),
+                        .gc (gc),
+                        .gc_ready (gc_ready),
+                        .mem_ready (mem_ready),
+                        .address1 (address1_mtu),
+                        .address2 (address2_mtu),
+                        .read_data1 (read_data1),
+                        .read_data2 (read_data2),
+                        .mem_execute (mem_execute_mtu),
+                        .mem_func (mem_func_mtu),
+                        .free_addr (free_addr),
+                        .write_data (write_data_mtu),
+                        .finished(traversal_finished),
+                        .traversal_error(traversal_error),
+                        .mux_controller(select),
+                        .module_address(module_address),
+                        .module_data(module_data),
+                        .module_finished(module_finished),
+                        .return_sys_func(return_sys_func),
+                        .return_state(return_state));
+`else
 mem_traversal traversal(.power (power),
                         .clk (clk),
                         .rst (reset),
@@ -297,6 +324,7 @@ mem_traversal traversal(.power (power),
                         .module_finished(module_finished),
                         .return_sys_func(return_sys_func),
                         .return_state(return_state));
+`endif
 
 //Instantiate Nock Execute Module
 execute execute(.clk(clk),

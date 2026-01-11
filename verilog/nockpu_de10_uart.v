@@ -1,6 +1,8 @@
 `include "memory_unit.vh"
 
-module nockpu_de10_uart(
+module nockpu_de10_uart #(
+  parameter integer USE_STACKLESS_TRAV = 1
+)(
   input CLOCK_50,
   input [1:0] KEY,
   input UART_RX,
@@ -109,7 +111,7 @@ module nockpu_de10_uart(
   );
 
   nockpu_top #(
-    .USE_STACKLESS_TRAV (1)
+    .USE_STACKLESS_TRAV (USE_STACKLESS_TRAV)
   ) core(
     .clk (clk),
     .rst (core_rst_n),

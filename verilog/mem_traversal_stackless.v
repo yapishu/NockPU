@@ -42,6 +42,7 @@ module mem_traversal_stackless(
   reg [7:0] debug_sig;
   wire is_running;
   assign is_running = !finished && execute;
+  reg execute_prev;
 
   // General Purpose Registers
   reg [`memory_addr_width - 1:0] address_gp;
@@ -108,7 +109,23 @@ module mem_traversal_stackless(
       root_addr <= {`memory_addr_width{1'b0}};
       traversal_error <= 0;
       is_finished_reg <= 1'b0;
+      execute_prev <= 1'b0;
     end else if (!execute) begin
+      execute_prev <= execute;
+      sys_func <= SYS_FUNC_READ;
+      state <= SYS_READ_INIT;
+      mem_addr <= start_addr;
+      trav_B <= `NIL;
+      trav_P <= start_addr;
+      mem_execute <= 1'b0;
+      gc_ready <= 1'b0;
+      debug_sig <= 0;
+      mux_controller <= `MUX_TRAVERSAL;
+      root_addr <= start_addr;
+      traversal_error <= 0;
+      is_finished_reg <= 1'b0;
+    end else if (execute && !execute_prev) begin
+      execute_prev <= execute;
       sys_func <= SYS_FUNC_READ;
       state <= SYS_READ_INIT;
       mem_addr <= start_addr;
@@ -122,10 +139,15 @@ module mem_traversal_stackless(
       traversal_error <= 0;
       is_finished_reg <= 1'b0;
     end else if (execute) begin
+      execute_prev <= execute;
       case (sys_func)
         SYS_FUNC_EXECUTE: begin
           case (state)
             SYS_EXECUTE_INIT: begin
+`ifdef TRACE_STACKLESS
+              $display("trav_stackless exec_init addr=%0d mem_tag=%h hed=%h tel=%h",
+                       mem_addr, mem_tag, hed, tel);
+`endif
               if (read_data1[`stack_bit] == 1'b1) begin
                 debug_sig <= 7;
                 state <= SYS_EXECUTE_STACK;
@@ -218,14 +240,27 @@ module mem_traversal_stackless(
                   state <= SYS_READ_GC_WAIT;
                   gc_ready <= 1'b1;
                 end else begin
-                  is_finished_reg <= 1'b1;
+                  if (mem_ready) begin
+                    address1 <= root_addr;
+                    mem_func <= `GET_CONTENTS;
+                    mem_execute <= 1'b1;
+                    state <= SYS_READ_DECODE;
+                  end else begin
+                    mem_func <= 0;
+                    mem_execute <= 1'b0;
+                  end
                 end
               end else begin
                 is_finished_reg <= 1'b0;
-                address1 <= mem_addr;
-                mem_func <= `GET_CONTENTS;
-                mem_execute <= 1'b1;
-                state <= SYS_READ_WAIT;
+                if (mem_ready) begin
+                  address1 <= mem_addr;
+                  mem_func <= `GET_CONTENTS;
+                  mem_execute <= 1'b1;
+                  state <= SYS_READ_WAIT;
+                end else begin
+                  mem_func <= 0;
+                  mem_execute <= 1'b0;
+                end
               end
             end
 
@@ -245,9 +280,36 @@ module mem_traversal_stackless(
               end
             end
 
+            SYS_READ_DECODE: begin
+              if (mem_ready) begin
+                mem_data <= read_data1;
+                mem_tag <= read_data1[`tag_start:`tag_end];
+                hed <= read_data1[`hed_start:`hed_end];
+                tel <= read_data1[`tel_start:`tel_end];
+                mem_execute <= 1'b0;
+                mem_func <= 0;
+                if (read_data1[`execute_bit] || read_data1[`stack_bit]) begin
+                  mem_addr <= root_addr;
+                  trav_P <= root_addr;
+                  trav_B <= `NIL;
+                  sys_func <= SYS_FUNC_TRAVERSE;
+                  state <= SYS_TRAVERSE_INIT;
+                  is_finished_reg <= 1'b0;
+                end else begin
+                  is_finished_reg <= 1'b1;
+                end
+              end else begin
+                mem_func <= 0;
+                mem_execute <= 0;
+              end
+            end
+
             SYS_READ_WAIT: begin
               gc_ready <= 1'b0;
               if (mem_ready) begin
+`ifdef TRACE_STACKLESS
+                $display("trav_stackless read addr=%0d data=%h", mem_addr, read_data1);
+`endif
                 debug_sig <= 6;
                 mem_data <= read_data1;
                 mem_tag <= read_data1[`tag_start:`tag_end];
@@ -266,11 +328,16 @@ module mem_traversal_stackless(
         SYS_FUNC_WRITE: begin
           case (state)
             SYS_WRITE_INIT: begin
-              address1 <= mem_addr;
-              write_data <= {mem_tag, hed, tel};
-              mem_func <= `SET_CONTENTS;
-              mem_execute <= 1'b1;
-              state <= SYS_WRITE_WAIT;
+              if (mem_ready) begin
+                address1 <= mem_addr;
+                write_data <= {mem_tag, hed, tel};
+                mem_func <= `SET_CONTENTS;
+                mem_execute <= 1'b1;
+                state <= SYS_WRITE_WAIT;
+              end else begin
+                mem_func <= 0;
+                mem_execute <= 1'b0;
+              end
             end
 
             SYS_WRITE_WAIT: begin
@@ -290,10 +357,21 @@ module mem_traversal_stackless(
         SYS_FUNC_TRAVERSE: begin
           case (state)
             SYS_TRAVERSE_INIT: begin
+`ifdef TRACE_STACKLESS
+              if (mem_tag[7]) begin
+                $display("trav_stackless traverse addr=%0d tag=%h hed=%h tel=%h trav_B=%0d trav_P=%0d",
+                         mem_addr, mem_tag, hed, tel, trav_B, trav_P);
+              end
+`endif
               if (mem_data[`large_atom_bit]) begin
-                mem_addr <= trav_B[`memory_addr_width - 1:0];
-                sys_func <= SYS_FUNC_READ;
-                state <= SYS_READ_INIT;
+                if (mem_tag[7] == 1'b1 && gc == 1'b0) begin
+                  sys_func <= SYS_FUNC_EXECUTE;
+                  state <= SYS_EXECUTE_INIT;
+                end else begin
+                  mem_addr <= trav_B[`memory_addr_width - 1:0];
+                  sys_func <= SYS_FUNC_READ;
+                  state <= SYS_READ_INIT;
+                end
               end else begin
                 case (mem_tag[1:0])
                   `CELL_CELL: begin
@@ -333,9 +411,14 @@ module mem_traversal_stackless(
                   end
 
                   `ATOM_ATOM: begin
-                    mem_addr <= trav_B[`memory_addr_width - 1:0];
-                    sys_func <= SYS_FUNC_READ;
-                    state <= SYS_READ_INIT;
+                    if (mem_tag[7] == 1'b1 && gc == 1'b0) begin
+                      sys_func <= SYS_FUNC_EXECUTE;
+                      state <= SYS_EXECUTE_INIT;
+                    end else begin
+                      mem_addr <= trav_B[`memory_addr_width - 1:0];
+                      sys_func <= SYS_FUNC_READ;
+                      state <= SYS_READ_INIT;
+                    end
                   end
 
                   `ATOM_CELL: begin
