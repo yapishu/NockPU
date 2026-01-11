@@ -20,6 +20,9 @@ module nockpu_top #(
   ,
   parameter integer USE_STACKLESS_TRAV = 0
 `endif
+  ,
+  parameter integer USE_SDRAM = 0,
+  parameter integer SDRAM_LATENCY = 4
 )(
   input clk,
   input rst,
@@ -154,7 +157,10 @@ module nockpu_top #(
   wire gc_ready;
 
   // Memory Unit.
-  memory_unit mem(
+  memory_unit #(
+    .USE_SDRAM (USE_SDRAM),
+    .SDRAM_LATENCY (SDRAM_LATENCY)
+  ) mem(
     .func (mem_func),
     .execute (mem_execute),
     .address1 (address1),

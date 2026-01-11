@@ -62,6 +62,11 @@ Notes:
 
 ## Configuration
 
-`verilog/nockpu_de10_uart.v` exposes `USE_STACKLESS_TRAV` (default 1) to select
-stackless traversal. Set it to 0 to use the stack-based traversal if you need
-debug parity with the stackful path.
+`verilog/nockpu_de10_uart.v` exposes:
+
+- `USE_STACKLESS_TRAV` (default 1) to select stackless traversal. Set it to 0 to
+  use the stack-based traversal if you need debug parity with the stackful path.
+- `USE_SDRAM` (default 0) to route memory through the `ram_sdram` stub instead
+  of on-chip RAM. This is a fixed-latency placeholder until a real SDRAM
+  controller is wired in.
+- `SDRAM_LATENCY` (default 4) to adjust the stubbed SDRAM latency.

@@ -16,6 +16,8 @@ correctness and keeping resource usage modest.
    - Long-term: a small open HDL SDRAM controller if we want portability.
 2. Build a `ram_sdram.v` wrapper that matches the `ram.v` ports but adds latency
    handling and serialize dual-port access into a single SDRAM port.
+   Status: implemented a fixed-latency stub in `verilog/ram_sdram.v` and wired it
+   via `USE_SDRAM` in `verilog/nockpu_de10_uart.v`.
 3. Update `memory_unit` to tolerate variable read latency, potentially by:
    - Latching requests, then waiting for `ram_sdram_ready`.
    - Returning `is_ready` only after the SDRAM read data is valid.

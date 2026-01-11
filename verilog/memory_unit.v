@@ -10,7 +10,10 @@
 
 `include "memory_unit.vh"
 
-module memory_unit(
+module memory_unit #(
+  parameter integer USE_SDRAM = 0,
+  parameter integer SDRAM_LATENCY = 4
+)(
   input power,
   input clk,
   input rst,
@@ -44,6 +47,16 @@ module memory_unit(
   reg [`memory_data_width - 1:0] mem_data_in;
   reg mem_req;
   wire ram_ready;
+  wire ram_ready_bram;
+  wire ram_ready_sdram;
+  wire ram_req_bram;
+  wire ram_req_sdram;
+  wire mem_write_bram;
+  wire mem_write_sdram;
+  wire [`memory_data_width - 1:0] mem_data_out1_bram;
+  wire [`memory_data_width - 1:0] mem_data_out2_bram;
+  wire [`memory_data_width - 1:0] mem_data_out1_sdram;
+  wire [`memory_data_width - 1:0] mem_data_out2_sdram;
 
   //Garbage Collection Registers
   reg [`memory_addr_width - 1:0] old_root;
@@ -107,15 +120,35 @@ module memory_unit(
             GC_DONE                   = 4'hE,
             GC_WAIT                   = 4'hF;
 
+  assign ram_req_bram = mem_req && !USE_SDRAM;
+  assign ram_req_sdram = mem_req && USE_SDRAM;
+  assign mem_write_bram = mem_write && !USE_SDRAM;
+  assign mem_write_sdram = mem_write && USE_SDRAM;
+  assign ram_ready = USE_SDRAM ? ram_ready_sdram : ram_ready_bram;
+  assign mem_data_out1 = USE_SDRAM ? mem_data_out1_sdram : mem_data_out1_bram;
+  assign mem_data_out2 = USE_SDRAM ? mem_data_out2_sdram : mem_data_out2_bram;
+
   ram ram(.address1 (mem_addr1),
           .address2 (mem_addr2),
           .clock (clk),
           .data (mem_data_in),
-          .wren (mem_write),
-          .req (mem_req),
-          .ready (ram_ready),
-          .q1 (mem_data_out1),
-          .q2 (mem_data_out2));
+          .wren (mem_write_bram),
+          .req (ram_req_bram),
+          .ready (ram_ready_bram),
+          .q1 (mem_data_out1_bram),
+          .q2 (mem_data_out2_bram));
+
+  ram_sdram #(
+          .LATENCY (SDRAM_LATENCY)
+  ) ram_sdram(.address1 (mem_addr1),
+          .address2 (mem_addr2),
+          .clock (clk),
+          .data (mem_data_in),
+          .wren (mem_write_sdram),
+          .req (ram_req_sdram),
+          .ready (ram_ready_sdram),
+          .q1 (mem_data_out1_sdram),
+          .q2 (mem_data_out2_sdram));
 
   always@(posedge clk or negedge rst) begin
   if(!rst) begin

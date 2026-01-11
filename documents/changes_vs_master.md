@@ -39,6 +39,9 @@ and includes uncommitted changes present when this file was written.
 - `verilog/nockpu_de10_uart.v`: added `USE_STACKLESS_TRAV` parameter (default 1)
   to control stackless traversal selection. Why: keep stackless optional while
   favoring the low-resource path on DE10-Lite.
+- `verilog/nockpu_de10_uart.v`: added `USE_SDRAM`/`SDRAM_LATENCY` parameters to
+  route memory through the SDRAM stub when desired. Why: hook up external-memory
+  plumbing without committing to a full controller yet.
 - `verilog/nockpu_uart_ctrl.v`, `verilog/uart_rx.v`, `verilog/uart_tx.v`: UART
   protocol and transport. Why: load memory, start execution, and fetch results
   over a simple serial link.
@@ -53,11 +56,17 @@ and includes uncommitted changes present when this file was written.
 - `verilog/ram.v`: RAM depth derived from `memory_addr_width` and now uses a
   `req/ready` handshake to gate accesses (optional `TRACE_RAM` debug). Why:
   correct sizing plus a clean hook for variable-latency memory.
+- `verilog/ram_sdram.v`: new SDRAM wrapper stub with fixed latency and serialized
+  read phases. Why: stand-in for an external SDRAM controller while keeping the
+  core interface stable.
 - `verilog/memory_unit.v`: allocator/GC fixes (free pointer updates, `free_addr`
   set after GC, corrected max-memory mask, reset defaults, optional TRACE logging,
   and removed hard `$stop`). Added `free_ptr` output and a RAM `req/ready` handshake
   so reads/writes/GC wait on `ram_ready`. Why: robust resource management and a
   latency-tolerant memory interface for SDRAM.
+- `verilog/memory_unit.v`: added `USE_SDRAM`/`SDRAM_LATENCY` to select the SDRAM
+  stub and route memory outputs accordingly. Why: enable variable-latency external
+  memory without breaking the existing tests.
 - `verilog/mem_traversal.v`: explicit traversal stack with `STACK_DEPTH` parameter,
   `in_stack` guard, mem-ready edge handling, GC restart path, and `root_addr` output.
   Error propagation covers all modules. Why: deterministic traversal and GC safety.

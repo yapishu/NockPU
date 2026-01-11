@@ -1,7 +1,9 @@
 `include "memory_unit.vh"
 
 module nockpu_de10_uart #(
-  parameter integer USE_STACKLESS_TRAV = 1
+  parameter integer USE_STACKLESS_TRAV = 1,
+  parameter integer USE_SDRAM = 0,
+  parameter integer SDRAM_LATENCY = 4
 )(
   input CLOCK_50,
   input [1:0] KEY,
@@ -111,7 +113,9 @@ module nockpu_de10_uart #(
   );
 
   nockpu_top #(
-    .USE_STACKLESS_TRAV (USE_STACKLESS_TRAV)
+    .USE_STACKLESS_TRAV (USE_STACKLESS_TRAV),
+    .USE_SDRAM (USE_SDRAM),
+    .SDRAM_LATENCY (SDRAM_LATENCY)
   ) core(
     .clk (clk),
     .rst (core_rst_n),
